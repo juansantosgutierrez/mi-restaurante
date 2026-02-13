@@ -1,54 +1,45 @@
 import streamlit as st
-from streamlit_gsheets import GSheetsConnection
-import pandas as pd
-from datetime import datetime
 
-# 🎨 Configuración Estilo Chile
-st.set_page_config(page_title="Control Restaurante Santos", layout="wide")
-st.title("🍴 Sistema de Ventas (Pesos Chilenos)")
+# Configuración inicial
+st.set_page_config(page_title="Restaurante Santos", layout="wide")
+st.title("🍴 Gestión de Ventas - Restaurante Santos")
 
-# 🔗 ENLACE DIRECTO
-URL_DIRECTA = "https://docs.google.com/spreadsheets/d/1Y6y_hTRG-FJ6RdWfF6vETzxpyHBKvCLG9GgXa4eelbM/edit#gid=0"
+# Inicializamos el estado de la selección si no existe
+if 'seleccion' not in st.session_state:
+    st.session_state.seleccion = None
 
-conn = st.connection("gsheets", type=GSheetsConnection)
-
-# --- 💰 REGISTRO DE VENTAS ---
-st.subheader("Registrar Ingresos")
-col1, col2 = st.columns(2)
+# --- MENÚ PRINCIPAL ---
+st.subheader("Seleccione una Categoría")
+col1, col2, col3 = st.columns(3)
 
 with col1:
-    # Ajusté el precio a un promedio de almuerzo en Chile (ej: $5.000)
-    if st.button("🍲 ALMUERZO ($5.000)", use_container_width=True):
-        try:
-            nueva_fila = pd.DataFrame([{
-                "ID_Venta": datetime.now().strftime("%Y%m%d%H%M%S"),
-                "Fecha": datetime.now().strftime("%Y-%m-%d"),
-                "Hora": datetime.now().strftime("%H:%M:%S"),
-                "Categoria": "Almuerzo",
-                "Producto": "Menú Completo",
-                "Monto": 5000,
-                "Tipo": "PAGADO"
-            }])
-            
-            # Leemos y agregamos la fila
-            df_actual = conn.read(spreadsheet=URL_DIRECTA)
-            df_final = pd.concat([df_actual, nueva_fila], ignore_index=True)
-            
-            # Intentamos actualizar
-            conn.update(spreadsheet=URL_DIRECTA, data=df_final)
-            st.success("✅ Venta guardada correctamente")
-        except Exception as e:
-            st.error(f"Error de permisos: Necesitas conectar Google Cloud para escribir. {e}")
+    if st.button("🍳 DESAYUNO", use_container_width=True):
+        st.session_state.seleccion = "Desayuno"
 
 with col2:
-    if st.button("🥤 BEBIDA ($1.500)", use_container_width=True):
-        st.info("Botón de bebida configurado")
+    if st.button("🍲 ALMUERZO", use_container_width=True):
+        st.session_state.seleccion = "Almuerzo"
 
-# --- 📊 VISUALIZACIÓN ---
+with col3:
+    if st.button("🌙 CENA", use_container_width=True):
+        st.session_state.seleccion = "Cena"
+
+# --- SECCIÓN DINÁMICA ---
 st.divider()
-st.subheader("Últimos Registros")
-try:
-    data = conn.read(spreadsheet=URL_DIRECTA)
-    st.dataframe(data.tail(10), use_container_width=True)
-except:
-    st.write("Esperando datos...")
+
+if st.session_state.seleccion == "Desayuno":
+    st.info("☕ Opciones de Desayuno")
+    # Aquí irán los botones de Paila de huevo, Té, etc.
+    if st.button("⬅️ Volver al menú principal"):
+        st.session_state.seleccion = None
+
+elif st.session_state.seleccion == "Almuerzo":
+    st.info("🍲 Opciones de Almuerzo")
+    # Aquí irán los botones de Menú Completo, Solo Segundo, etc.
+    if st.button("⬅️ Volver al menú principal"):
+        st.session_state.seleccion = None
+
+elif st.session_state.seleccion == "Cena":
+    st.info("🌙 Opciones de Cena")
+    if st.button("⬅️ Volver al menú principal"):
+        st.session_state.seleccion = None
