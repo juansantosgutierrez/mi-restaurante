@@ -1,45 +1,66 @@
 import streamlit as st
+from streamlit_gsheets import GSheetsConnection
+import pandas as pd
+from datetime import datetime
 
-# Configuración inicial
+# Configuración de página
 st.set_page_config(page_title="Restaurante Santos", layout="wide")
-st.title("🍴 Gestión de Ventas - Restaurante Santos")
+st.title("🍴 Sistema de Ventas - Restaurante Santos")
 
-# Inicializamos el estado de la selección si no existe
-if 'seleccion' not in st.session_state:
-    st.session_state.seleccion = None
+# Enlace a tu hoja
+URL_DIRECTA = "https://docs.google.com/spreadsheets/d/1Y6y_hTRG-FJ6RdWfF6vETzxpyHBKvCLG9GgXa4eelbM/edit#gid=0"
+conn = st.connection("gsheets", type=GSheetsConnection)
 
-# --- MENÚ PRINCIPAL ---
-st.subheader("Seleccione una Categoría")
-col1, col2, col3 = st.columns(3)
+# Función para guardar ventas (centralizada)
+def registrar_venta(producto, precio, categoria):
+    try:
+        nueva_fila = pd.DataFrame([{
+            "ID_Venta": datetime.now().strftime("%Y%m%d%H%M%S"),
+            "Fecha": datetime.now().strftime("%Y-%m-%d"),
+            "Hora": datetime.now().strftime("%H:%M:%S"),
+            "Categoria": categoria,
+            "Producto": producto,
+            "Monto": precio,
+            "Tipo": "PAGADO"
+        }])
+        df_actual = conn.read(spreadsheet=URL_DIRECTA)
+        df_final = pd.concat([df_actual, nueva_fila], ignore_index=True)
+        conn.update(spreadsheet=URL_DIRECTA, data=df_final)
+        st.success(f"✅ {producto} registrado (${precio})")
+    except Exception as e:
+        st.error(f"Error al guardar: {e}")
 
-with col1:
-    if st.button("🍳 DESAYUNO", use_container_width=True):
-        st.session_state.seleccion = "Desayuno"
+# --- SECCIÓN 1: COMIDA 🍲 ---
+with st.expander("🍔 COMIDA (Desayuno, Almuerzo, Cena)", expanded=True):
+    tab1, tab2, tab3 = st.tabs(["🍳 Desayuno", "🍲 Almuerzo", "🌙 Cena"])
+    
+    with tab1:
+        if st.button("🐢 Tortuga Normal ($2.500)", use_container_width=True):
+            registrar_venta("Tortuga Normal", 2500, "Desayuno")
+            
+    with tab2:
+        if st.button("🍱 Menú ($3.500)", use_container_width=True):
+            registrar_venta("Menú", 3500, "Almuerzo")
+            
+    with tab3:
+        if st.button("🍽️ Cena ($3.500)", use_container_width=True):
+            registrar_venta("Cena", 3500, "Cena")
 
-with col2:
-    if st.button("🍲 ALMUERZO", use_container_width=True):
-        st.session_state.seleccion = "Almuerzo"
+# --- SECCIÓN 2: BEBESTIBLE 🥤 ---
+with st.expander("🥤 BEBESTIBLE", expanded=True):
+    if st.button("🥤 Coca Cola ($2.000)", use_container_width=True):
+        registrar_venta("Coca Cola", 2000, "Bebestible")
 
-with col3:
-    if st.button("🌙 CENA", use_container_width=True):
-        st.session_state.seleccion = "Cena"
+# --- SECCIÓN 3: TIENDA 🏪 ---
+with st.expander("🏪 TIENDA", expanded=True):
+    if st.button("🍰 Queque ($1.000)", use_container_width=True):
+        registrar_venta("Queque", 1000, "Tienda")
 
-# --- SECCIÓN DINÁMICA ---
+# --- VISUALIZACIÓN DE ÚLTIMAS VENTAS ---
 st.divider()
-
-if st.session_state.seleccion == "Desayuno":
-    st.info("☕ Opciones de Desayuno")
-    # Aquí irán los botones de Paila de huevo, Té, etc.
-    if st.button("⬅️ Volver al menú principal"):
-        st.session_state.seleccion = None
-
-elif st.session_state.seleccion == "Almuerzo":
-    st.info("🍲 Opciones de Almuerzo")
-    # Aquí irán los botones de Menú Completo, Solo Segundo, etc.
-    if st.button("⬅️ Volver al menú principal"):
-        st.session_state.seleccion = None
-
-elif st.session_state.seleccion == "Cena":
-    st.info("🌙 Opciones de Cena")
-    if st.button("⬅️ Volver al menú principal"):
-        st.session_state.seleccion = None
+st.subheader("📊 Últimos Registros")
+try:
+    data = conn.read(spreadsheet=URL_DIRECTA)
+    st.dataframe(data.tail(5), use_container_width=True)
+except:
+    st.info("Cargando tabla de ventas...")
