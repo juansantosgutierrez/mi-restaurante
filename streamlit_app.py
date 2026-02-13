@@ -3,73 +3,68 @@ from streamlit_gsheets import GSheetsConnection
 import pandas as pd
 from datetime import datetime
 
+# 🎨 Configuración de pantalla
 st.set_page_config(page_title="Restaurante Santos", layout="wide")
 
-# CSS para agrandar las pestañas (Tabs) y estilos de botones
-st.markdown("""
-    <style>
-    /* Tamaño de letra para Desayuno, Almuerzo, Cena */
-    button[data-baseweb="tab"] div {
-        font-size: 24px !important;
-        font-weight: bold;
-    }
-    /* Estilo para botones seleccionados (verde suave) */
-    .stButton > button[data-selected="true"] {
-        background-color: #d4edda !important;
-        border: 2px solid #28a745 !important;
-    }
-    </style>
-""", unsafe_allow_html=True)
+# Conexión a Google Sheets
+URL_DIRECTA = "https://docs.google.com/spreadsheets/d/1Y6y_hTRG-FJ6RdWfF6vETzxpyHBKvCLG9GgXa4eelbM/edit#gid=0"
+conn = st.connection("gsheets", type=GSheetsConnection)
 
-if 'carrito' not in st.session_state:
-    st.session_state.carrito = []
+# 🧠 Memoria de la App: Inicializar la lista si está vacía
+if 'pedido_temporal' not in st.session_state:
+    st.session_state.pedido_temporal = []
 
-# Función para saber si un producto ya está seleccionado
-def esta_en_carrito(nombre):
-    return any(item['prod'] == nombre for item in st.session_state.carrito)
+# 🏢 Estructura de 2 Columnas: [Menú (3 partes), Lista (1 parte)]
+col_menu, col_lista = st.columns([3, 1])
 
-# --- PANEL LATERAL (RESUMEN) ---
-with st.sidebar:
-    st.header("📋 Resumen del Pedido")
-    if not st.session_state.carrito:
-        st.write("No hay productos seleccionados.")
+with col_menu:
+    st.title("🍴 Menú Restaurante Santos")
+    
+    # --- SECCIÓN 1: COMIDA ---
+    with st.expander("🍔 COMIDA", expanded=True):
+        # Estilo para que Desayuno, Almuerzo y Cena se vean grandes
+        st.markdown("<style>button[data-baseweb='tab'] {font-size: 20px !important;}</style>", unsafe_allow_html=True)
+        t1, t2, t3 = st.tabs(["🍳 Desayuno", "🍲 Almuerzo", "🌙 Cena"])
+        
+        with t1:
+            c1, c2, c3, c4, c5 = st.columns(5)
+            with c1:
+                if st.button("🐢\n\nTortuga\nNormal\n\n$2.500", key="tortuga_btn"):
+                    st.session_state.pedido_temporal.append({"prod": "Tortuga Normal", "precio": 2500, "cat": "Desayuno"})
+                    st.rerun()
+
+    # --- SECCIÓN 2: BEBESTIBLE ---
+    with st.expander("🥤 BEBESTIBLE", expanded=True):
+        c1, c2, c3, c4, c5 = st.columns(5)
+        with c1:
+            if st.button("🥤\n\nCoca Cola\n\n$2.000", key="coca_btn"):
+                st.session_state.pedido_temporal.append({"prod": "Coca Cola", "precio": 2000, "cat": "Bebestible"})
+                st.rerun()
+
+    # --- SECCIÓN 3: TIENDA ---
+    with st.expander("🏪 TIENDA", expanded=True):
+        c1, c2, c3, c4, c5 = st.columns(5)
+        with c1:
+            if st.button("🍰\n\nQueque\n\n$1.000", key="queque_btn"):
+                st.session_state.pedido_temporal.append({"prod": "Queque", "precio": 1000, "cat": "Tienda"})
+
+# 📋 COLUMNA DERECHA: LA LISTA DE PEDIDOS
+with col_lista:
+    st.markdown("### 📝 Pedido Actual")
+    
+    if not st.session_state.pedido_temporal:
+        st.write("Selecciona productos...")
     else:
         total = 0
-        for i, item in enumerate(st.session_state.carrito):
-            col_item, col_borrar = st.columns([4, 1])
-            col_item.write(f"**{item['prod']}**\n${item['precio']:,}")
-            if col_borrar.button("❌", key=f"del_{i}"):
-                st.session_state.carrito.pop(i)
-                st.rerun()
+        for i, item in enumerate(st.session_state.pedido_temporal):
+            st.write(f"{item['prod']} - **${item['precio']:,}**")
             total += item['precio']
         
         st.divider()
-        st.subheader(f"TOTAL: ${total:,}")
+        st.markdown(f"## TOTAL: ${total:,}")
         
-        if st.button("✅ CONFIRMAR Y FINALIZAR", use_container_width=True, type="primary"):
-            # Aquí va la lógica de guardado en GSheets que ya tenemos
-            st.success("Venta procesada con éxito")
-            st.session_state.carrito = []
+        if st.button("✅ FINALIZAR VENTA", use_container_width=True, type="primary"):
+            # Aquí pondremos la lógica para guardar toda la lista en GSheets
+            st.success("¡Guardado!")
+            st.session_state.pedido_temporal = []
             st.rerun()
-
-# --- CUERPO PRINCIPAL ---
-st.header("COMIDA")
-with st.expander("Opciones", expanded=True):
-    t1, t2, t3 = st.tabs(["🍳 Desayuno", "🍲 Almuerzo", "🌙 Cena"])
-    
-    with t1:
-        c1, c2, c3, c4, c5 = st.columns(5)
-        with c1:
-            prod, precio = "Tortuga Normal", 2500
-            seleccionado = esta_en_carrito(prod)
-            # Usamos un truco de HTML/CSS para el color verde si está seleccionado
-            if st.button(f"🐢\n{prod}\n${precio:,}", use_container_width=True, key="btn_tortuga"):
-                if not seleccionado:
-                    st.session_state.carrito.append({"prod": prod, "precio": precio, "cat": "Desayuno"})
-                    st.rerun()
-
-st.header("BEBESTIBLE")
-# (Aquí iría la cuadrícula de bebidas con la misma lógica)
-
-st.header("TIENDA")
-# (Aquí iría la cuadrícula de tienda)
