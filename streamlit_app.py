@@ -3,74 +3,63 @@ from streamlit_gsheets import GSheetsConnection
 import pandas as pd
 from datetime import datetime
 
-# Configuración de página
 st.set_page_config(page_title="Restaurante Santos", layout="wide")
+
+# Estilo personalizado para que los botones se vean más grandes y el botón de confirmar resalte
+st.markdown("""
+    <style>
+    div.stButton > button {
+        height: 100px;
+        font-size: 20px !important;
+    }
+    .confirm-btn button {
+        background-color: #28a745 !important;
+        color: white !important;
+        font-weight: bold !important;
+    }
+    </style>
+""", unsafe_allow_html=True)
+
 st.title("🍴 Sistema de Ventas - Restaurante Santos")
 
-# Enlace a tu hoja
-URL_DIRECTA = "https://docs.google.com/spreadsheets/d/1Y6y_hTRG-FJ6RdWfF6vETzxpyHBKvCLG9GgXa4eelbM/edit#gid=0"
-conn = st.connection("gsheets", type=GSheetsConnection)
+# Inicializar el "carrito" de la sesión si no existe
+if 'carrito' not in st.session_state:
+    st.session_state.carrito = []
 
-# Función para guardar ventas
-def registrar_venta(producto, precio, categoria):
-    try:
-        nueva_fila = pd.DataFrame([{
-            "ID_Venta": datetime.now().strftime("%Y%m%d%H%M%S"),
-            "Fecha": datetime.now().strftime("%Y-%m-%d"),
-            "Hora": datetime.now().strftime("%H:%M:%S"),
-            "Categoria": categoria,
-            "Producto": producto,
-            "Monto": precio,
-            "Tipo": "PAGADO"
-        }])
-        df_actual = conn.read(spreadsheet=URL_DIRECTA)
-        df_final = pd.concat([df_actual, nueva_fila], ignore_index=True)
-        conn.update(spreadsheet=URL_DIRECTA, data=df_final)
-        st.success(f"✅ {producto} registrado (${precio})")
-    except Exception as e:
-        st.error(f"Error al guardar: {e}")
-
-# --- SECCIÓN 1: COMIDA 🍲 ---
-with st.expander("🍔 COMIDA", expanded=True):
-    tab1, tab2, tab3 = st.tabs(["🍳 Desayuno", "🍲 Almuerzo", "🌙 Cena"])
-    
-    with tab1:
+# --- Categorías con letras grandes ---
+st.markdown("## 🍲 COMIDA")
+with st.expander("Abrir opciones de comida", expanded=True):
+    t1, t2, t3 = st.tabs(["🍳 Desayuno", "🍲 Almuerzo", "🌙 Cena"])
+    with t1:
         c1, c2, c3, c4, c5 = st.columns(5)
         with c1:
-            if st.button("🐢\n\nTortuga\nNormal\n\n$2.500", use_container_width=True):
-                registrar_venta("Tortuga Normal", 2500, "Desayuno")
-            
-    with tab2:
-        c1, c2, c3, c4, c5 = st.columns(5)
-        with c1:
-            if st.button("🍱\n\nMenú\nCompleto\n\n$3.500", use_container_width=True):
-                registrar_venta("Menú", 3500, "Almuerzo")
-            
-    with tab3:
-        c1, c2, c3, c4, c5 = st.columns(5)
-        with c1:
-            if st.button("🍽️\n\nCena\n\n$3.500", use_container_width=True):
-                registrar_venta("Cena", 3500, "Cena")
+            if st.button("🐢\nTortuga\n$2.500", use_container_width=True):
+                st.session_state.carrito.append({"prod": "Tortuga Normal", "precio": 2500, "cat": "Desayuno"})
 
-# --- SECCIÓN 2: BEBESTIBLE 🥤 ---
-with st.expander("🥤 BEBESTIBLE", expanded=True):
+st.markdown("## 🥤 BEBESTIBLE")
+with st.container():
     c1, c2, c3, c4, c5 = st.columns(5)
     with c1:
-        if st.button("🥤\n\nCoca Cola\n\n$2.000", use_container_width=True):
-            registrar_venta("Coca Cola", 2000, "Bebestible")
+        if st.button("🥤\nCoca Cola\n$2.000", use_container_width=True):
+            st.session_state.carrito.append({"prod": "Coca Cola", "precio": 2000, "cat": "Bebestible"})
 
-# --- SECCIÓN 3: TIENDA 🏪 ---
-with st.expander("🏪 TIENDA", expanded=True):
+st.markdown("## 🏪 TIENDA")
+with st.container():
     c1, c2, c3, c4, c5 = st.columns(5)
     with c1:
-        if st.button("🍰\n\nQueque\n\n$1.000", use_container_width=True):
-            registrar_venta("Queque", 1000, "Tienda")
+        if st.button("🍰\nQueque\n$1.000", use_container_width=True):
+            st.session_state.carrito.append({"prod": "Queque", "precio": 1000, "cat": "Tienda"})
 
-# --- VISUALIZACIÓN ---
+# --- SECCIÓN DE CONFIRMACIÓN (Derecha/Abajo) ---
 st.divider()
-st.subheader("📊 Últimos Registros")
-try:
-    data = conn.read(spreadsheet=URL_DIRECTA)
-    st.dataframe(data.tail(5), use_container_width=True)
-except:
-    st.info("Sincronizando con Google Sheets...")
+if st.session_state.carrito:
+    st.subheader("🛒 Pedido actual:")
+    for item in st.session_state.carrito:
+        st.write(f"- {item['prod']} (${item['precio']})")
+    
+    col_vacia, col_btn = st.columns([3, 1])
+    with col_btn:
+        if st.button("✅ CONFIRMAR Y FINALIZAR", use_container_width=True):
+            # Aquí iría la lógica para guardar TODO el carrito en el Excel
+            st.success("¡Venta procesada!")
+            st.session_state.carrito = [] # Limpiar carrito
