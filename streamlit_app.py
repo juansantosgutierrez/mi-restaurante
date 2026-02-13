@@ -11,7 +11,7 @@ st.title("🍴 Sistema de Ventas - Restaurante Santos")
 URL_DIRECTA = "https://docs.google.com/spreadsheets/d/1Y6y_hTRG-FJ6RdWfF6vETzxpyHBKvCLG9GgXa4eelbM/edit#gid=0"
 conn = st.connection("gsheets", type=GSheetsConnection)
 
-# Función para guardar ventas (centralizada)
+# Función para guardar ventas
 def registrar_venta(producto, precio, categoria):
     try:
         nueva_fila = pd.DataFrame([{
@@ -31,36 +31,46 @@ def registrar_venta(producto, precio, categoria):
         st.error(f"Error al guardar: {e}")
 
 # --- SECCIÓN 1: COMIDA 🍲 ---
-with st.expander("🍔 COMIDA (Desayuno, Almuerzo, Cena)", expanded=True):
+with st.expander("🍔 COMIDA", expanded=True):
     tab1, tab2, tab3 = st.tabs(["🍳 Desayuno", "🍲 Almuerzo", "🌙 Cena"])
     
     with tab1:
-        if st.button("🐢 Tortuga Normal ($2.500)", use_container_width=True):
-            registrar_venta("Tortuga Normal", 2500, "Desayuno")
+        c1, c2, c3, c4, c5 = st.columns(5)
+        with c1:
+            if st.button("🐢\n\nTortuga\nNormal\n\n$2.500", use_container_width=True):
+                registrar_venta("Tortuga Normal", 2500, "Desayuno")
             
     with tab2:
-        if st.button("🍱 Menú ($3.500)", use_container_width=True):
-            registrar_venta("Menú", 3500, "Almuerzo")
+        c1, c2, c3, c4, c5 = st.columns(5)
+        with c1:
+            if st.button("🍱\n\nMenú\nCompleto\n\n$3.500", use_container_width=True):
+                registrar_venta("Menú", 3500, "Almuerzo")
             
     with tab3:
-        if st.button("🍽️ Cena ($3.500)", use_container_width=True):
-            registrar_venta("Cena", 3500, "Cena")
+        c1, c2, c3, c4, c5 = st.columns(5)
+        with c1:
+            if st.button("🍽️\n\nCena\n\n$3.500", use_container_width=True):
+                registrar_venta("Cena", 3500, "Cena")
 
 # --- SECCIÓN 2: BEBESTIBLE 🥤 ---
 with st.expander("🥤 BEBESTIBLE", expanded=True):
-    if st.button("🥤 Coca Cola ($2.000)", use_container_width=True):
-        registrar_venta("Coca Cola", 2000, "Bebestible")
+    c1, c2, c3, c4, c5 = st.columns(5)
+    with c1:
+        if st.button("🥤\n\nCoca Cola\n\n$2.000", use_container_width=True):
+            registrar_venta("Coca Cola", 2000, "Bebestible")
 
 # --- SECCIÓN 3: TIENDA 🏪 ---
 with st.expander("🏪 TIENDA", expanded=True):
-    if st.button("🍰 Queque ($1.000)", use_container_width=True):
-        registrar_venta("Queque", 1000, "Tienda")
+    c1, c2, c3, c4, c5 = st.columns(5)
+    with c1:
+        if st.button("🍰\n\nQueque\n\n$1.000", use_container_width=True):
+            registrar_venta("Queque", 1000, "Tienda")
 
-# --- VISUALIZACIÓN DE ÚLTIMAS VENTAS ---
+# --- VISUALIZACIÓN ---
 st.divider()
 st.subheader("📊 Últimos Registros")
 try:
     data = conn.read(spreadsheet=URL_DIRECTA)
     st.dataframe(data.tail(5), use_container_width=True)
 except:
-    st.info("Cargando tabla de ventas...")
+    st.info("Sincronizando con Google Sheets...")
