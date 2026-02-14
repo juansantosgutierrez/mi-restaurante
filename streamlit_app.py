@@ -13,34 +13,43 @@ if 'pedido_temporal' not in st.session_state:
 if 'modo_editor' not in st.session_state:
     st.session_state.modo_editor = False
 
-# --- VENTANA FLOTANTE: RECARGAS (Rápida y optimizada) ---
+# --- VENTANA: RECARGAS ---
 @st.dialog("📲 Realizar Recarga")
 def modal_recarga():
     operador = st.selectbox("Selecciona Operador", ["WOM", "ENTEL", "MOVISTAR", "CLARO"])
-    monto_recarga = st.number_input("Monto de la Recarga ($)", min_value=0, step=500)
-    if st.button("Agregar al Pedido", type="primary"):
-        if monto_recarga > 0:
-            # Se agrega directamente al carrito para finalizar todo junto
+    monto_r = st.number_input("Monto de la Recarga ($)", min_value=0, step=500)
+    if st.button("Agregar al Pedido"):
+        if monto_r > 0:
             st.session_state.pedido_temporal.append({
-                "Categoria": "Recarga", 
-                "Producto": f"Recarga {operador}", 
-                "Monto": int(monto_recarga)
+                "Categoria": "Recarga", "Producto": f"Recarga {operador}", "Monto": int(monto_r)
             })
             st.rerun()
 
-# --- VENTANA FLOTANTE: GASTOS ---
+# --- VENTANA: OTROS (Venta Especial) ---
+@st.dialog("📦 Venta Especial / Otros")
+def modal_otros():
+    descripcion = st.text_input("¿Qué se vendió?")
+    monto_o = st.number_input("Monto ($)", min_value=0, step=100)
+    if st.button("Agregar al Pedido"):
+        if descripcion and monto_o > 0:
+            st.session_state.pedido_temporal.append({
+                "Categoria": "Otros", "Producto": descripcion, "Monto": int(monto_o)
+            })
+            st.rerun()
+
+# --- VENTANA: GASTOS ---
 @st.dialog("💸 Registrar Gasto")
 def modal_gastos():
-    monto = st.number_input("Monto ($)", min_value=0, step=500)
-    desc = st.text_input("Descripción")
-    origen = st.selectbox("¿De dónde sale la plata?", ["Comida", "Bebestible", "Tienda", "Recarga", "Chela", "Otros", "Caja General"])
+    m = st.number_input("Monto ($)", min_value=0, step=500)
+    d = st.text_input("Descripción")
+    o = st.selectbox("¿De dónde sale la plata?", ["Comida", "Bebestible", "Tienda", "Recarga", "Chela", "Otros", "Caja General"])
     if st.button("Guardar Gasto"):
-        df_g = pd.DataFrame([{"Fecha": datetime.now().strftime("%Y-%m-%d %H:%M"), "Monto": int(monto), "Descripcion": desc, "Saco De": origen}])
+        df_g = pd.DataFrame([{"Fecha": datetime.now().strftime("%Y-%m-%d %H:%M"), "Monto": int(m), "Descripcion": d, "Saco De": o}])
         df_act = conn.read(spreadsheet=URL_DIRECTA, worksheet="Gastos", ttl=0).dropna(how="all")
         conn.update(spreadsheet=URL_DIRECTA, worksheet="Gastos", data=pd.concat([df_act, df_g], ignore_index=True))
         st.rerun()
 
-# --- INTERFAZ ---
+# --- LÓGICA DE INTERFAZ ---
 def leer_menu():
     try: return conn.read(spreadsheet=URL_DIRECTA, worksheet="Menu_Dia", ttl=0).dropna(how="all")
     except: return pd.DataFrame(columns=["Categoria", "Producto", "Monto"])
@@ -57,15 +66,17 @@ if c3.button(txt, use_container_width=True):
 col_m, col_p = st.columns([3, 1])
 
 with col_m:
-    def mostrar_seccion(tit, cat, es_especial=False):
+    def mostrar_seccion(tit, cat, especial=None):
         st.markdown(f"---")
         st.markdown(f"### {tit}")
         grid = st.columns(5)
         
-        if es_especial and cat == "Recarga":
+        if especial == "Recarga":
             with grid[0]:
-                if st.button("📲\n\nRECARGAR\n\n(Abrir)", use_container_width=True):
-                    modal_recarga()
+                if st.button("📲\n\nRECARGAR", use_container_width=True): modal_recarga()
+        elif especial == "Otros":
+            with grid[0]:
+                if st.button("📦\n\nVENTA ESPECIAL", use_container_width=True): modal_otros()
         else:
             items = df_menu[df_menu["Categoria"] == cat]
             for i, (idx, row) in enumerate(items.iterrows()):
@@ -81,7 +92,7 @@ with col_m:
             if st.session_state.modo_editor:
                 with grid[len(items) % 5]:
                     if st.button(f"➕\n\nNuevo\n{tit}", key=f"a_{cat}", use_container_width=True):
-                        # Aquí llamamos al modal de nuevo producto (omitido por brevedad, igual al anterior)
+                        # Aquí llamarías al modal_nuevo creado anteriormente
                         pass
 
     with st.expander("🍔 COMIDA", expanded=True):
@@ -92,14 +103,14 @@ with col_m:
     
     mostrar_seccion("🥤 BEBESTIBLE", "Bebestible")
     mostrar_seccion("🏪 TIENDA", "Tienda")
-    mostrar_seccion("📲 RECARGA", "Recarga", es_especial=True)
+    mostrar_seccion("📲 RECARGA", "Recarga", especial="Recarga")
     mostrar_seccion("🍺 CHELA", "Chela")
-    mostrar_seccion("📦 OTROS", "Otros")
+    mostrar_seccion("📦 OTROS", "Otros", especial="Otros")
 
 with col_p:
     st.subheader("📝 Pedido")
     total = sum(int(i["Monto"]) for i in st.session_state.pedido_temporal)
-    for i, item in enumerate(st.session_state.pedido_temporal):
+    for item in st.session_state.pedido_temporal:
         st.write(f"• {item['Producto']} (${int(item['Monto']):,})".replace(",", "."))
     st.divider()
     st.markdown(f"## TOTAL: ${total:,}".replace(",", "."))
