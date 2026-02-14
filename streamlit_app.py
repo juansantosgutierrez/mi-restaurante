@@ -6,7 +6,7 @@ from datetime import datetime
 # 🎨 Configuración
 st.set_page_config(page_title="Restaurante Santos", layout="wide")
 
-# CSS para Pedido Flotante
+# CSS para Pedido Flotante y Estilo Chileno
 st.markdown("""
     <style>
     [data-testid="stVerticalBlock"] > div:nth-child(2) [data-testid="stVerticalBlock"] {
@@ -19,26 +19,19 @@ st.markdown("""
 URL_DIRECTA = "https://docs.google.com/spreadsheets/d/1Y6y_hTRG-FJ6RdWfF6vETzxpyHBKvCLG9GgXa4eelbM/edit#gid=0"
 conn = st.connection("gsheets", type=GSheetsConnection)
 
-# --- MEMORIA (Optimización de velocidad) ---
+# --- MEMORIA ---
 if 'pedido_temporal' not in st.session_state:
     st.session_state.pedido_temporal = []
 if 'modo_editor' not in st.session_state:
     st.session_state.modo_editor = False
-if 'menu_cache' not in st.session_state:
-    st.session_state.menu_cache = None
 
-# --- FUNCIONES ---
+# --- FUNCIÓN DE LECTURA ---
 def leer_menu():
-    # Solo lee de Sheets si la memoria está vacía para ganar velocidad
-    if st.session_state.menu_cache is None:
-        try:
-            st.session_state.menu_cache = conn.read(spreadsheet=URL_DIRECTA, worksheet="Menu_Dia", ttl=0).dropna(how="all")
-        except:
-            st.session_state.menu_cache = pd.DataFrame(columns=["Categoria", "Producto", "Monto"])
-    return st.session_state.menu_cache
-
-def reset_cache():
-    st.session_state.menu_cache = None
+    try:
+        # ttl=0 asegura que si editas el menú, el cambio se vea
+        return conn.read(spreadsheet=URL_DIRECTA, worksheet="Menu_Dia", ttl=0).dropna(how="all")
+    except:
+        return pd.DataFrame(columns=["Categoria", "Producto", "Monto"])
 
 # --- MODALES ---
 @st.dialog("➕ Nuevo Producto")
@@ -50,7 +43,6 @@ def modal_nuevo(cat):
             df_act = leer_menu()
             df_n = pd.DataFrame([{"Categoria": cat, "Producto": n, "Monto": int(p)}])
             conn.update(spreadsheet=URL_DIRECTA, worksheet="Menu_Dia", data=pd.concat([df_act, df_n], ignore_index=True))
-            reset_cache()
             st.rerun()
 
 @st.dialog("📲 Recarga")
@@ -92,7 +84,7 @@ if c3.button(txt_btn, use_container_width=True):
     st.session_state.modo_editor = not st.session_state.modo_editor
     st.rerun()
 
-col_m, col_p = st.columns([3, 1.2]) # Un poco más ancho para los botones de borrar
+col_m, col_p = st.columns([3, 1.2])
 
 with col_m:
     def mostrar_seccion(titulo, cat, especial=None):
@@ -111,11 +103,15 @@ with col_m:
                     if st.session_state.modo_editor:
                         if st.button("❌", key=f"del_menu_{idx}"):
                             conn.update(spreadsheet=URL_DIRECTA, worksheet="Menu_Dia", data=df_menu.drop(idx))
-                            reset_cache()
                             st.rerun()
                     p_f = f"${int(row['Monto']):,}".replace(",", ".")
+                    # CORRECCIÓN: El botón ahora sí guarda el producto correctamente
                     if st.button(f"{row['Producto']}\n\n{p_f}", key=f"btn_{idx}", use_container_width=True):
-                        st.session_state.pedido_temporal.append(row.to_dict())
+                        st.session_state.pedido_temporal.append({
+                            "Categoria": row["Categoria"],
+                            "Producto": row["Producto"],
+                            "Monto": int(row["Monto"])
+                        })
                         st.rerun()
             if st.session_state.modo_editor:
                 with grid[len(items) % 5]:
@@ -136,19 +132,19 @@ with col_m:
 
 with col_p:
     st.subheader("📝 Pedido Actual")
-    total = 0
+    total_acumulado = 0
     # Listar pedido con opción de borrar
-    for i, item in enumerate(st.session_state.pedido_temporal):
-        total += int(item["Monto"])
-        p_i = f"${int(item['Monto']):,}".replace(",", ".")
-        col_txt, col_btn = st.columns([4, 1])
-        col_txt.write(f"• {item['Producto']} ({p_f})")
-        if col_btn.button("🗑️", key=f"del_item_{i}"):
+    for i, item_ped in enumerate(st.session_state.pedido_temporal):
+        total_acumulado += int(item_ped["Monto"])
+        p_item_fmt = f"${int(item_ped['Monto']):,}".replace(",", ".")
+        c_txt, c_del = st.columns([4, 1])
+        c_txt.write(f"• {item_ped['Producto']} ({p_item_fmt})")
+        if c_del.button("🗑️", key=f"del_ped_{i}"):
             st.session_state.pedido_temporal.pop(i)
             st.rerun()
             
     st.divider()
-    st.markdown(f"## TOTAL: ${total:,}".replace(",", "."))
+    st.markdown(f"## TOTAL: ${total_acumulado:,}".replace(",", "."))
     if st.button("✅ FINALIZAR VENTA", type="primary", use_container_width=True):
         if st.session_state.pedido_temporal:
             df_v = pd.DataFrame(st.session_state.pedido_temporal)
