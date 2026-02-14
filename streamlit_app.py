@@ -3,15 +3,19 @@ from streamlit_gsheets import GSheetsConnection
 import pandas as pd
 from datetime import datetime
 
-# 🎨 Configuración
+# 🎨 Configuración de pantalla
 st.set_page_config(page_title="Restaurante Santos", layout="wide")
 
-# CSS para Pedido Flotante y Estilo Chileno
+# CSS para que el Pedido FLOTE y baje contigo
 st.markdown("""
     <style>
-    [data-testid="stVerticalBlock"] > div:nth-child(2) [data-testid="stVerticalBlock"] {
+    [data-testid="stSidebarUserContent"] {
+        padding-top: 1rem;
+    }
+    .stColumn > div {
         position: sticky;
-        top: 2rem;
+        top: 50px;
+        height: auto;
     }
     </style>
 """, unsafe_allow_html=True)
@@ -25,15 +29,12 @@ if 'pedido_temporal' not in st.session_state:
 if 'modo_editor' not in st.session_state:
     st.session_state.modo_editor = False
 
-# --- FUNCIÓN DE LECTURA ---
+# --- FUNCIONES ---
 def leer_menu():
-    try:
-        # ttl=0 asegura que si editas el menú, el cambio se vea
-        return conn.read(spreadsheet=URL_DIRECTA, worksheet="Menu_Dia", ttl=0).dropna(how="all")
-    except:
-        return pd.DataFrame(columns=["Categoria", "Producto", "Monto"])
+    try: return conn.read(spreadsheet=URL_DIRECTA, worksheet="Menu_Dia", ttl=0).dropna(how="all")
+    except: return pd.DataFrame(columns=["Categoria", "Producto", "Monto"])
 
-# --- MODALES ---
+# --- VENTANAS FLOTANTES (MODALES) ---
 @st.dialog("➕ Nuevo Producto")
 def modal_nuevo(cat):
     n = st.text_input(f"Nombre del {cat}")
@@ -45,11 +46,11 @@ def modal_nuevo(cat):
             conn.update(spreadsheet=URL_DIRECTA, worksheet="Menu_Dia", data=pd.concat([df_act, df_n], ignore_index=True))
             st.rerun()
 
-@st.dialog("📲 Recarga")
+@st.dialog("📲 Realizar Recarga")
 def modal_recarga():
     op = st.selectbox("Operador", ["WOM", "ENTEL", "MOVISTAR", "CLARO"])
     m = st.number_input("Monto ($)", min_value=0, step=500)
-    if st.button("Agregar"):
+    if st.button("Agregar al Pedido"):
         if m > 0:
             st.session_state.pedido_temporal.append({"Categoria": "Recarga", "Producto": f"Recarga {op}", "Monto": int(m)})
             st.rerun()
@@ -58,7 +59,7 @@ def modal_recarga():
 def modal_otros():
     desc = st.text_input("¿Qué se vendió?")
     m = st.number_input("Monto ($)", min_value=0, step=100)
-    if st.button("Agregar"):
+    if st.button("Agregar al Pedido"):
         if desc and m > 0:
             st.session_state.pedido_temporal.append({"Categoria": "Otros", "Producto": desc, "Monto": int(m)})
             st.rerun()
@@ -84,12 +85,13 @@ if c3.button(txt_btn, use_container_width=True):
     st.session_state.modo_editor = not st.session_state.modo_editor
     st.rerun()
 
-col_m, col_p = st.columns([3, 1.2])
+col_m, col_p = st.columns([3, 1.2]) # Un poco más ancho para el basurero
 
 with col_m:
     def mostrar_seccion(titulo, cat, especial=None):
         st.header(titulo)
         grid = st.columns(5)
+        
         if especial == "Recarga":
             with grid[0]:
                 if st.button("📲\n\nRECARGAR", use_container_width=True): modal_recarga()
@@ -101,21 +103,16 @@ with col_m:
             for i, (idx, row) in enumerate(items.iterrows()):
                 with grid[i % 5]:
                     if st.session_state.modo_editor:
-                        if st.button("❌", key=f"del_menu_{idx}"):
+                        if st.button("❌", key=f"d_{idx}"):
                             conn.update(spreadsheet=URL_DIRECTA, worksheet="Menu_Dia", data=df_menu.drop(idx))
                             st.rerun()
                     p_f = f"${int(row['Monto']):,}".replace(",", ".")
-                    # CORRECCIÓN: El botón ahora sí guarda el producto correctamente
-                    if st.button(f"{row['Producto']}\n\n{p_f}", key=f"btn_{idx}", use_container_width=True):
-                        st.session_state.pedido_temporal.append({
-                            "Categoria": row["Categoria"],
-                            "Producto": row["Producto"],
-                            "Monto": int(row["Monto"])
-                        })
+                    if st.button(f"{row['Producto']}\n\n{p_f}", key=f"b_{idx}", use_container_width=True):
+                        st.session_state.pedido_temporal.append(row.to_dict())
                         st.rerun()
             if st.session_state.modo_editor:
                 with grid[len(items) % 5]:
-                    if st.button(f"➕\n\nNuevo\n{titulo}", key=f"add_{cat}", use_container_width=True):
+                    if st.button(f"➕\n\nNuevo\n{titulo}", key=f"a_{cat}", use_container_width=True):
                         modal_nuevo(cat)
 
     with st.expander("🍔 COMIDA", expanded=True):
@@ -132,29 +129,28 @@ with col_m:
 
 with col_p:
     st.subheader("📝 Pedido Actual")
-    total_acumulado = 0
-    # Listar pedido con opción de borrar
-    for i, item_ped in enumerate(st.session_state.pedido_temporal):
-        total_acumulado += int(item_ped["Monto"])
-        p_item_fmt = f"${int(item_ped['Monto']):,}".replace(",", ".")
-        c_txt, c_del = st.columns([4, 1])
-        c_txt.write(f"• {item_ped['Producto']} ({p_item_fmt})")
-        if c_del.button("🗑️", key=f"del_ped_{i}"):
+    total = 0
+    # Aquí está el cambio: Lista con basurero independiente
+    for i, item in enumerate(st.session_state.pedido_temporal):
+        total += int(item["Monto"])
+        p_i = f"${int(item['Monto']):,}".replace(",", ".")
+        
+        # Usamos columnas pequeñas dentro de la lista para separar el texto del basurero
+        col_txt, col_del = st.columns([4, 1])
+        col_txt.write(f"• {item['Producto']} ({p_i})")
+        if col_del.button("🗑️", key=f"del_item_{i}"):
             st.session_state.pedido_temporal.pop(i)
             st.rerun()
             
     st.divider()
-    st.markdown(f"## TOTAL: ${total_acumulado:,}".replace(",", "."))
+    st.markdown(f"## TOTAL: ${total:,}".replace(",", "."))
     if st.button("✅ FINALIZAR VENTA", type="primary", use_container_width=True):
         if st.session_state.pedido_temporal:
             df_v = pd.DataFrame(st.session_state.pedido_temporal)
             ahora = datetime.now()
-            df_v["ID_Venta"] = ahora.strftime("%Y%m%d%H%M%S")
-            df_v["Fecha"] = ahora.strftime("%Y-%m-%d")
-            df_v["Hora"] = ahora.strftime("%H:%M:%S")
-            df_v["Tipo"] = "PAGADO"
+            df_v["ID_Venta"] = ahora.strftime("%Y%m%d%H%M%S"); df_v["Fecha"] = ahora.strftime("%Y-%m-%d")
+            df_v["Hora"] = ahora.strftime("%H:%M:%S"); df_v["Tipo"] = "PAGADO"
             df_v = df_v[["ID_Venta", "Fecha", "Hora", "Categoria", "Producto", "Monto", "Tipo"]]
             df_h = conn.read(spreadsheet=URL_DIRECTA, worksheet="Hoja 1", ttl=0).dropna(how="all")
             conn.update(spreadsheet=URL_DIRECTA, worksheet="Hoja 1", data=pd.concat([df_h, df_v], ignore_index=True))
-            st.session_state.pedido_temporal = []
-            st.rerun()
+            st.session_state.pedido_temporal = []; st.rerun()
