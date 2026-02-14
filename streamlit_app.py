@@ -6,20 +6,17 @@ from datetime import datetime
 # 🎨 Configuración de pantalla
 st.set_page_config(page_title="Restaurante Santos", layout="wide")
 
-# CSS para Pedido Flotante y Estilos de Títulos
+# CSS para que el Pedido FLOTE y baje contigo
 st.markdown("""
     <style>
-    /* Hace que la columna del pedido siga el scroll */
-    [data-testid="stVerticalBlock"] > div:nth-child(2) [data-testid="stVerticalBlock"] {
-        position: sticky;
-        top: 2rem;
+    /* Este código hace que la columna del pedido se mueva contigo al bajar */
+    [data-testid="stSidebarUserContent"] {
+        padding-top: 1rem;
     }
-    /* Estilo para los títulos de sección */
-    .titulo-seccion {
-        font-size: 28px !important;
-        font-weight: bold;
-        margin-top: 20px;
-        margin-bottom: 10px;
+    .stColumn > div {
+        position: sticky;
+        top: 50px;
+        height: auto;
     }
     </style>
 """, unsafe_allow_html=True)
@@ -33,7 +30,7 @@ if 'pedido_temporal' not in st.session_state:
 if 'modo_editor' not in st.session_state:
     st.session_state.modo_editor = False
 
-# --- FUNCIONES DE BASE DE DATOS ---
+# --- FUNCIONES ---
 def leer_menu():
     try: return conn.read(spreadsheet=URL_DIRECTA, worksheet="Menu_Dia", ttl=0).dropna(how="all")
     except: return pd.DataFrame(columns=["Categoria", "Producto", "Monto"])
@@ -93,7 +90,7 @@ col_m, col_p = st.columns([3, 1])
 
 with col_m:
     def mostrar_seccion(titulo, cat, especial=None):
-        st.markdown(f'<p class="titulo-seccion">{titulo}</p>', unsafe_allow_html=True)
+        st.header(titulo) # Restaurado al tamaño estándar de antes
         grid = st.columns(5)
         
         if especial == "Recarga":
@@ -119,20 +116,21 @@ with col_m:
                     if st.button(f"➕\n\nNuevo\n{titulo}", key=f"a_{cat}", use_container_width=True):
                         modal_nuevo(cat)
 
-    # Secciones principales
-    t1, t2, t3 = st.tabs(["🍳 Desayuno", "🍲 Almuerzo", "🌙 Cena"])
-    with t1: mostrar_seccion("Desayuno", "Desayuno")
-    with t2: mostrar_seccion("Almuerzo", "Almuerzo")
-    with t3: mostrar_seccion("Cena", "Cena")
+    # Estructura restaurada
+    with st.expander("🍔 COMIDA", expanded=True):
+        t1, t2, t3 = st.tabs(["🍳 Desayuno", "🍲 Almuerzo", "🌙 Cena"])
+        with t1: mostrar_seccion("Desayuno", "Desayuno")
+        with t2: mostrar_seccion("Almuerzo", "Almuerzo")
+        with t3: mostrar_seccion("Cena", "Cena")
     
-    mostrar_seccion("Bebestible", "Bebestible")
-    mostrar_seccion("Tienda", "Tienda")
-    mostrar_seccion("Recarga", "Recarga", especial="Recarga")
-    mostrar_seccion("Chela", "Chela")
-    mostrar_seccion("Otros", "Otros", especial="Otros")
+    mostrar_seccion("🥤 BEBESTIBLE", "Bebestible")
+    mostrar_seccion("🏪 TIENDA", "Tienda")
+    mostrar_seccion("📲 RECARGA", "Recarga", especial="Recarga")
+    mostrar_seccion("🍺 CHELA", "Chela")
+    mostrar_seccion("📦 OTROS", "Otros", especial="Otros")
 
 with col_p:
-    st.markdown("### 📝 Pedido Actual")
+    st.subheader("📝 Pedido Actual")
     total = sum(int(i["Monto"]) for i in st.session_state.pedido_temporal)
     for item in st.session_state.pedido_temporal:
         p_i = f"${int(item['Monto']):,}".replace(",", ".")
