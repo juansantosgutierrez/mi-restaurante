@@ -6,10 +6,9 @@ from datetime import datetime
 # 🎨 Configuración de pantalla
 st.set_page_config(page_title="Restaurante Santos", layout="wide")
 
-# CSS para que el Pedido FLOTE y baje contigo
+# CSS para que el Pedido FLOTE
 st.markdown("""
     <style>
-    /* Este código hace que la columna del pedido se mueva contigo al bajar */
     [data-testid="stSidebarUserContent"] {
         padding-top: 1rem;
     }
@@ -24,16 +23,20 @@ st.markdown("""
 URL_DIRECTA = "https://docs.google.com/spreadsheets/d/1Y6y_hTRG-FJ6RdWfF6vETzxpyHBKvCLG9GgXa4eelbM/edit#gid=0"
 conn = st.connection("gsheets", type=GSheetsConnection)
 
-# --- MEMORIA ---
+# --- MEMORIA Y CACHÉ ---
 if 'pedido_temporal' not in st.session_state:
     st.session_state.pedido_temporal = []
 if 'modo_editor' not in st.session_state:
     st.session_state.modo_editor = False
 
-# --- FUNCIONES ---
-def leer_menu():
-    try: return conn.read(spreadsheet=URL_DIRECTA, worksheet="Menu_Dia", ttl=0).dropna(how="all")
-    except: return pd.DataFrame(columns=["Categoria", "Producto", "Monto"])
+# Esta función ahora guarda el menú en memoria por 10 minutos (600 segundos)
+# Esto hace que seleccionar productos sea instantáneo.
+@st.cache_data(ttl=600)
+def leer_menu_rapido():
+    try: 
+        return conn.read(spreadsheet=URL_DIRECTA, worksheet="Menu_Dia", ttl=0).dropna(how="all")
+    except: 
+        return pd.DataFrame(columns=["Categoria", "Producto", "Monto"])
 
 # --- VENTANAS FLOTANTES (MODALES) ---
 @st.dialog("➕ Nuevo Producto")
@@ -42,9 +45,10 @@ def modal_nuevo(cat):
     p = st.number_input("Precio ($)", min_value=0, step=100)
     if st.button("Guardar"):
         if n and p > 0:
-            df_act = leer_menu()
+            df_act = leer_menu_rapido()
             df_n = pd.DataFrame([{"Categoria": cat, "Producto": n, "Monto": int(p)}])
             conn.update(spreadsheet=URL_DIRECTA, worksheet="Menu_Dia", data=pd.concat([df_act, df_n], ignore_index=True))
+            st.cache_data.clear() # Limpia la memoria para que aparezca el nuevo producto
             st.rerun()
 
 @st.dialog("📲 Realizar Recarga")
@@ -77,10 +81,16 @@ def modal_gastos():
         st.rerun()
 
 # --- INTERFAZ ---
-df_menu = leer_menu()
+df_menu = leer_menu_rapido()
 c1, c2, c3 = st.columns([2, 1, 1])
 c1.title("🍴 Restaurante Santos")
 if c2.button("💸 GASTOS", use_container_width=True): modal_gastos()
+
+# Botón para forzar actualización si cambias algo manualmente en el Excel
+if c1.button("🔄 Sincronizar Excel"):
+    st.cache_data.clear()
+    st.rerun()
+
 txt_btn = "🔄 CERRAR EDITOR" if st.session_state.modo_editor else "➕ AGREGAR MENU HOY"
 if c3.button(txt_btn, use_container_width=True):
     st.session_state.modo_editor = not st.session_state.modo_editor
@@ -106,6 +116,7 @@ with col_m:
                     if st.session_state.modo_editor:
                         if st.button("❌", key=f"d_{idx}"):
                             conn.update(spreadsheet=URL_DIRECTA, worksheet="Menu_Dia", data=df_menu.drop(idx))
+                            st.cache_data.clear()
                             st.rerun()
                     p_f = f"${int(row['Monto']):,}".replace(",", ".")
                     if st.button(f"{row['Producto']}\n\n{p_f}", key=f"b_{idx}", use_container_width=True):
@@ -132,10 +143,8 @@ with col_p:
     st.subheader("📝 Pedido Actual")
     total = sum(int(i["Monto"]) for i in st.session_state.pedido_temporal)
     
-    # Mostrar cada producto con un botón para eliminarlo del pedido
     for i, item in enumerate(st.session_state.pedido_temporal):
         p_i = f"${int(item['Monto']):,}".replace(",", ".")
-        # Usamos columnas pequeñas para poner el texto y el basurero al lado
         col_txt, col_del = st.columns([4, 1])
         col_txt.write(f"• {item['Producto']} ({p_i})")
         if col_del.button("🗑️", key=f"del_ped_{i}"):
@@ -148,9 +157,15 @@ with col_p:
         if st.session_state.pedido_temporal:
             df_v = pd.DataFrame(st.session_state.pedido_temporal)
             ahora = datetime.now()
-            df_v["ID_Venta"] = ahora.strftime("%Y%m%d%H%M%S"); df_v["Fecha"] = ahora.strftime("%Y-%m-%d")
-            df_v["Hora"] = ahora.strftime("%H:%M:%S"); df_v["Tipo"] = "PAGADO"
+            df_v["ID_Venta"] = ahora.strftime("%Y%m%d%H%M%S")
+            df_v["Fecha"] = ahora.strftime("%Y-%m-%d")
+            df_v["Hora"] = ahora.strftime("%H:%M:%S")
+            df_v["Tipo"] = "PAGADO"
             df_v = df_v[["ID_Venta", "Fecha", "Hora", "Categoria", "Producto", "Monto", "Tipo"]]
+            
+            # Para finalizar venta, leemos la Hoja 1 y guardamos. 
+            # Esto siempre tendrá un pequeño delay por ser escritura en la nube.
             df_h = conn.read(spreadsheet=URL_DIRECTA, worksheet="Hoja 1", ttl=0).dropna(how="all")
             conn.update(spreadsheet=URL_DIRECTA, worksheet="Hoja 1", data=pd.concat([df_h, df_v], ignore_index=True))
-            st.session_state.pedido_temporal = []; st.rerun()
+            st.session_state.pedido_temporal = []
+            st.rerun()
