@@ -3,136 +3,117 @@ from streamlit_gsheets import GSheetsConnection
 import pandas as pd
 from datetime import datetime
 
-# 🎨 Configuración de pantalla
 st.set_page_config(page_title="Restaurante Santos", layout="wide")
-
-# Conexión a Google Sheets
 URL_DIRECTA = "https://docs.google.com/spreadsheets/d/1Y6y_hTRG-FJ6RdWfF6vETzxpyHBKvCLG9GgXa4eelbM/edit#gid=0"
 conn = st.connection("gsheets", type=GSheetsConnection)
 
-# 🧠 Memoria de la App
+# --- MEMORIA TEMPORAL ---
 if 'pedido_temporal' not in st.session_state:
     st.session_state.pedido_temporal = []
+if 'modo_editor' not in st.session_state:
+    st.session_state.modo_editor = False
 
-# --- 🛠️ VENTANA FLOTANTE DE GASTOS ---
-@st.dialog("Registrar Gasto")
+# --- FUNCIONES DE BASE DE DATOS ---
+def leer_menu():
+    try:
+        return conn.read(spreadsheet=URL_DIRECTA, worksheet="Menu_Dia").dropna(how="all")
+    except:
+        return pd.DataFrame(columns=["Categoria", "Producto", "Monto"])
+
+def guardar_item_menu(cat, prod, precio):
+    df_actual = leer_menu()
+    nuevo = pd.DataFrame([{"Categoria": cat, "Producto": prod, "Monto": precio}])
+    df_final = pd.concat([df_actual, nuevo], ignore_index=True)
+    conn.update(spreadsheet=URL_DIRECTA, worksheet="Menu_Dia", data=df_final)
+
+def borrar_item_menu(index_borrar):
+    df_actual = leer_menu()
+    df_final = df_actual.drop(index_borrar)
+    conn.update(spreadsheet=URL_DIRECTA, worksheet="Menu_Dia", data=df_final)
+
+# --- VENTANAS FLOTANTES ---
+@st.dialog("➕ Agregar al Menú")
+def modal_nuevo_item(categoria):
+    nombre = st.text_input(f"Nombre del {categoria}")
+    precio = st.number_input("Precio ($)", min_value=0, step=100)
+    if st.button("Guardar"):
+        if nombre and precio > 0:
+            guardar_item_menu(categoria, nombre, precio)
+            st.rerun()
+
+@st.dialog("💸 Gastos")
 def modal_gastos():
-    st.write("Anota los detalles del gasto aquí abajo:")
-    monto_gasto = st.number_input("Monto Gastado ($)", min_value=0, step=100)
-    desc_gasto = st.text_input("Descripción (Ej: Saco para agua)")
-    
-    if st.button("Guardar Gasto", type="primary"):
-        if monto_gasto > 0 and desc_gasto:
-            try:
-                # Crear datos del gasto
-                df_gasto = pd.DataFrame([{
-                    "Fecha": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                    "Monto": monto_gasto,
-                    "Descripcion": desc_gasto
-                }])
-                
-                # Leer hoja de Gastos y actualizar
-                df_actual_gastos = conn.read(spreadsheet=URL_DIRECTA, worksheet="Gastos")
-                df_final_gastos = pd.concat([df_actual_gastos, df_gasto], ignore_index=True)
-                conn.update(spreadsheet=URL_DIRECTA, worksheet="Gastos", data=df_final_gastos)
-                
-                st.success(f"Gasto de ${monto_gasto} guardado correctamente.")
-                st.rerun()
-            except Exception as e:
-                st.error(f"Error: Asegúrate de que la pestaña se llame 'Gastos'. {e}")
-        else:
-            st.warning("Por favor completa el monto y la descripción.")
+    monto = st.number_input("Monto ($)", min_value=0)
+    desc = st.text_input("Descripción")
+    if st.button("Guardar Gasto"):
+        df_g = pd.DataFrame([{"Fecha": datetime.now().strftime("%Y-%m-%d %H:%M"), "Monto": monto, "Descripcion": desc}])
+        df_act = conn.read(spreadsheet=URL_DIRECTA, worksheet="Gastos").dropna(how="all")
+        conn.update(spreadsheet=URL_DIRECTA, worksheet="Gastos", data=pd.concat([df_act, df_g], ignore_index=True))
+        st.rerun()
 
-# --- 🔝 BARRA SUPERIOR (Botones de Control) ---
-col_titulo, col_btn1, col_btn2 = st.columns([2, 1, 1])
+# --- INTERFAZ ---
+c_tit, c_g, c_e = st.columns([2, 1, 1])
+c_tit.title("🍴 Restaurante Santos")
+if c_g.button("💸 GASTOS", use_container_width=True): modal_gastos()
+txt_ed = "🔄 CERRAR EDITOR" if st.session_state.modo_editor else "➕ AGREGAR MENU HOY"
+if c_e.button(txt_ed, use_container_width=True):
+    st.session_state.modo_editor = not st.session_state.modo_editor
+    st.rerun()
 
-with col_titulo:
-    st.title("🍴 Menú Restaurante Santos")
-
-with col_btn1:
-    if st.button("💸 GASTOS", use_container_width=True):
-        modal_gastos()
-
-with col_btn2:
-    if st.button("➕ AGREGAR MENU HOY", use_container_width=True):
-        st.info("Próximamente: Aquí configuraremos el menú dinámico.")
-
-# --- 🏢 ESTRUCTURA DE VENTAS (Lo que ya teníamos) ---
-col_menu, col_lista = st.columns([3, 1])
+df_menu = leer_menu()
+col_menu, col_pedido = st.columns([3, 1])
 
 with col_menu:
-    with st.expander("🍔 COMIDA", expanded=True):
-        st.markdown("<style>button[data-baseweb='tab'] {font-size: 20px !important;}</style>", unsafe_allow_html=True)
-        t1, t2, t3 = st.tabs(["🍳 Desayuno", "🍲 Almuerzo", "🌙 Cena"])
+    def mostrar_seccion(categoria):
+        items = df_menu[df_menu["Categoria"] == categoria]
+        cols = st.columns(5)
         
-        with t1:
-            c1, c2, c3, c4, c5 = st.columns(5)
-            with c1:
-                if st.button("🐢\n\nTortuga\nNormal\n\n$2.500", key="tortuga"):
-                    st.session_state.pedido_temporal.append({"Producto": "Tortuga Normal", "Monto": 2500, "Categoria": "Desayuno"})
+        # Productos existentes
+        for i, (idx, row) in enumerate(items.iterrows()):
+            with cols[i % 5]:
+                # Si el editor está activo, ponemos la X arriba
+                if st.session_state.modo_editor:
+                    if st.button(f"❌", key=f"del_{idx}"):
+                        borrar_item_menu(idx)
+                        st.rerun()
+                
+                if st.button(f"{row['Producto']}\n\n${row['Monto']:,}", key=f"btn_{idx}", use_container_width=True):
+                    st.session_state.pedido_temporal.append({"Categoria": row['Categoria'], "Producto": row['Producto'], "Monto": row['Monto']})
                     st.rerun()
-        # ... (Resto de los botones de Almuerzo, Cena, Bebestible y Tienda iguales que antes)
-        with t2:
-            c1, c2, c3, c4, c5 = st.columns(5)
-            with c1:
-                if st.button("🍱\n\nMenú\n\n$3.500", key="menu"):
-                    st.session_state.pedido_temporal.append({"Producto": "Menú", "Monto": 3500, "Categoria": "Almuerzo"})
-                    st.rerun()
-            with c2:
-                if st.button("🍛\n\nSegundo\nSolo\n\n$2.500", key="segundo"):
-                    st.session_state.pedido_temporal.append({"Producto": "Segundo Solo", "Monto": 2500, "Categoria": "Almuerzo"})
-                    st.rerun()
-            with c3:
-                if st.button("🥣\n\nSopa\nSola\n\n$1.500", key="sopa"):
-                    st.session_state.pedido_temporal.append({"Producto": "Sopa Sola", "Monto": 1500, "Categoria": "Almuerzo"})
-                    st.rerun()
-        with t3:
-            c1, c2, c3, c4, c5 = st.columns(5)
-            with c1:
-                if st.button("🍽️\n\nCena\n\n$3.500", key="cena"):
-                    st.session_state.pedido_temporal.append({"Producto": "Cena", "Monto": 3500, "Categoria": "Cena"})
-                    st.rerun()
+        
+        # Botón "+" si el editor está activo
+        if st.session_state.modo_editor:
+            with cols[len(items) % 5]:
+                if st.button(f"➕\n\nNuevo\n{categoria}", key=f"plus_{categoria}", use_container_width=True):
+                    modal_nuevo_item(categoria)
 
-    with st.expander("🥤 BEBESTIBLE", expanded=True):
-        c1, c2, c3, c4, c5 = st.columns(5)
-        with c1:
-            if st.button("🥤\n\nCoca Cola\n\n$2.000", key="coca"):
-                st.session_state.pedido_temporal.append({"Producto": "Coca Cola", "Monto": 2000, "Categoria": "Bebestible"})
-                st.rerun()
+    with st.expander("🍔 COMIDA", expanded=True):
+        t1, t2, t3 = st.tabs(["🍳 Desayuno", "🍲 Almuerzo", "🌙 Cena"])
+        with t1: mostrar_seccion("Desayuno")
+        with t2: mostrar_seccion("Almuerzo")
+        with t3: mostrar_seccion("Cena")
+    
+    st.markdown("### 🥤 BEBESTIBLE")
+    mostrar_seccion("Bebestible")
+    st.markdown("### 🏪 TIENDA")
+    mostrar_seccion("Tienda")
 
-    with st.expander("🏪 TIENDA", expanded=True):
-        c1, c2, c3, c4, c5 = st.columns(5)
-        with c1:
-            if st.button("🍰\n\nQueque\n\n$1.000", key="queque"):
-                st.session_state.pedido_temporal.append({"Producto": "Queque", "Monto": 1000, "Categoria": "Tienda"})
-                st.rerun()
-
-# 📋 COLUMNA DERECHA (LISTA)
-with col_lista:
-    st.markdown("### 📝 Pedido Actual")
-    if not st.session_state.pedido_temporal:
-        st.write("Selecciona productos...")
-    else:
-        total = 0
-        for i, item in enumerate(st.session_state.pedido_temporal):
-            st.write(f"• {item['Producto']} - **${item['Monto']:,}**")
-            total += item['Monto']
-        st.divider()
-        st.markdown(f"## TOTAL: ${total:,}")
-        if st.button("✅ FINALIZAR VENTA", use_container_width=True, type="primary"):
-            try:
-                df_existente = conn.read(spreadsheet=URL_DIRECTA, worksheet="Hoja 1")
-                df_nuevo = pd.DataFrame(st.session_state.pedido_temporal)
-                ahora = datetime.now()
-                df_nuevo["ID_Venta"] = ahora.strftime("%Y%m%d%H%M%S")
-                df_nuevo["Fecha"] = ahora.strftime("%Y-%m-%d")
-                df_nuevo["Hora"] = ahora.strftime("%H:%M:%S")
-                df_nuevo["Tipo"] = "PAGADO"
-                df_nuevo = df_nuevo[["ID_Venta", "Fecha", "Hora", "Categoria", "Producto", "Monto", "Tipo"]]
-                df_final = pd.concat([df_existente, df_nuevo], ignore_index=True)
-                conn.update(spreadsheet=URL_DIRECTA, worksheet="Hoja 1", data=df_final)
-                st.success("¡Venta guardada!")
-                st.session_state.pedido_temporal = []
-                st.rerun()
-            except Exception as e:
-                st.error(f"Error al guardar venta: {e}")
+with col_pedido:
+    st.subheader("📝 Pedido")
+    total = sum(i["Monto"] for i in st.session_state.pedido_temporal)
+    for i, item in enumerate(st.session_state.pedido_temporal):
+        st.write(f"• {item['Producto']} (${item['Monto']:,})")
+    st.divider()
+    st.markdown(f"## TOTAL: ${total:,}")
+    if st.button("✅ FINALIZAR VENTA", type="primary", use_container_width=True):
+        if st.session_state.pedido_temporal:
+            df_v = pd.DataFrame(st.session_state.pedido_temporal)
+            ahora = datetime.now()
+            df_v["ID_Venta"] = ahora.strftime("%Y%m%d%H%M%S")
+            df_v["Fecha"] = ahora.strftime("%Y-%m-%d")
+            df_v["Hora"] = ahora.strftime("%H:%M:%S")
+            df_v["Tipo"] = "PAGADO"
+            df_v = df_v[["ID_Venta", "Fecha", "Hora", "Categoria", "Producto", "Monto", "Tipo"]]
+            df_hist = conn.read(spreadsheet=URL_DIRECTA, worksheet="Hoja 1").dropna(how="all")
+            conn.update(spreadsheet=URL_DIRECTA, worksheet="Hoja 1", data=pd.concat([df_hist, df_v], ignore_index=True))
+            st.session_state.pedido_temporal = []; st.rerun()
