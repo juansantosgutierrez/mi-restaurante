@@ -9,6 +9,7 @@ st.set_page_config(page_title="Restaurante Santos", layout="wide")
 # CSS para que el Pedido FLOTE y baje contigo
 st.markdown("""
     <style>
+    /* Este código hace que la columna del pedido se mueva contigo al bajar */
     [data-testid="stSidebarUserContent"] {
         padding-top: 1rem;
     }
@@ -85,7 +86,7 @@ if c3.button(txt_btn, use_container_width=True):
     st.session_state.modo_editor = not st.session_state.modo_editor
     st.rerun()
 
-col_m, col_p = st.columns([3, 1.2]) # Un poco más ancho para el basurero
+col_m, col_p = st.columns([3, 1])
 
 with col_m:
     def mostrar_seccion(titulo, cat, especial=None):
@@ -129,16 +130,15 @@ with col_m:
 
 with col_p:
     st.subheader("📝 Pedido Actual")
-    total = 0
-    # Aquí está el cambio: Lista con basurero independiente
+    total = sum(int(i["Monto"]) for i in st.session_state.pedido_temporal)
+    
+    # Mostrar cada producto con un botón para eliminarlo del pedido
     for i, item in enumerate(st.session_state.pedido_temporal):
-        total += int(item["Monto"])
         p_i = f"${int(item['Monto']):,}".replace(",", ".")
-        
-        # Usamos columnas pequeñas dentro de la lista para separar el texto del basurero
+        # Usamos columnas pequeñas para poner el texto y el basurero al lado
         col_txt, col_del = st.columns([4, 1])
         col_txt.write(f"• {item['Producto']} ({p_i})")
-        if col_del.button("🗑️", key=f"del_item_{i}"):
+        if col_del.button("🗑️", key=f"del_ped_{i}"):
             st.session_state.pedido_temporal.pop(i)
             st.rerun()
             
