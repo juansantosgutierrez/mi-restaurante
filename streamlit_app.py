@@ -29,8 +29,6 @@ if 'pedido_temporal' not in st.session_state:
 if 'modo_editor' not in st.session_state:
     st.session_state.modo_editor = False
 
-# Esta función ahora guarda el menú en memoria por 10 minutos (600 segundos)
-# Esto hace que seleccionar productos sea instantáneo.
 @st.cache_data(ttl=600)
 def leer_menu_rapido():
     try: 
@@ -48,7 +46,7 @@ def modal_nuevo(cat):
             df_act = leer_menu_rapido()
             df_n = pd.DataFrame([{"Categoria": cat, "Producto": n, "Monto": int(p)}])
             conn.update(spreadsheet=URL_DIRECTA, worksheet="Menu_Dia", data=pd.concat([df_act, df_n], ignore_index=True))
-            st.cache_data.clear() # Limpia la memoria para que aparezca el nuevo producto
+            st.cache_data.clear() 
             st.rerun()
 
 @st.dialog("📲 Realizar Recarga")
@@ -86,7 +84,6 @@ c1, c2, c3 = st.columns([2, 1, 1])
 c1.title("🍴 Restaurante Santos")
 if c2.button("💸 GASTOS", use_container_width=True): modal_gastos()
 
-# Botón para forzar actualización si cambias algo manualmente en el Excel
 if c1.button("🔄 Sincronizar Excel"):
     st.cache_data.clear()
     st.rerun()
@@ -153,19 +150,39 @@ with col_p:
             
     st.divider()
     st.markdown(f"## TOTAL: ${total:,}".replace(",", "."))
+    
+    # ==========================================
+    # BOTÓN FINALIZAR VENTA CON LÓGICA DE IMPRESIÓN
+    # ==========================================
     if st.button("✅ FINALIZAR VENTA", type="primary", use_container_width=True):
         if st.session_state.pedido_temporal:
             df_v = pd.DataFrame(st.session_state.pedido_temporal)
             ahora = datetime.now()
+            
+            # 1. Asignar datos obligatorios
             df_v["ID_Venta"] = ahora.strftime("%Y%m%d%H%M%S")
             df_v["Fecha"] = ahora.strftime("%Y-%m-%d")
             df_v["Hora"] = ahora.strftime("%H:%M:%S")
             df_v["Tipo"] = "PAGADO"
-            df_v = df_v[["ID_Venta", "Fecha", "Hora", "Categoria", "Producto", "Monto", "Tipo"]]
             
-            # Para finalizar venta, leemos la Hoja 1 y guardamos. 
-            # Esto siempre tendrá un pequeño delay por ser escritura en la nube.
-            df_h = conn.read(spreadsheet=URL_DIRECTA, worksheet="Hoja 1", ttl=0).dropna(how="all")
-            conn.update(spreadsheet=URL_DIRECTA, worksheet="Hoja 1", data=pd.concat([df_h, df_v], ignore_index=True))
-            st.session_state.pedido_temporal = []
-            st.rerun()
+            # 2. Filtrar qué se imprime (Solo categorías de comida)
+            #
+            categorias_imprimibles = ["Desayuno", "Almuerzo", "Cena"]
+            df_v["Estado_Impresion"] = df_v["Categoria"].apply(
+                lambda x: "PENDIENTE" if x in categorias_imprimibles else "N/A"
+            )
+            
+            # 3. Organizar columnas según tu mapeo de Excel (A hasta H)
+            #
+            df_v = df_v[["ID_Venta", "Fecha", "Hora", "Categoria", "Producto", "Monto", "Tipo", "Estado_Impresion"]]
+            
+            # 4. Guardar en la nube (Hoja 1)
+            try:
+                df_h = conn.read(spreadsheet=URL_DIRECTA, worksheet="Hoja 1", ttl=0).dropna(how="all")
+                conn.update(spreadsheet=URL_DIRECTA, worksheet="Hoja 1", data=pd.concat([df_h, df_v], ignore_index=True))
+                
+                st.success("✅ Venta registrada correctamente.")
+                st.session_state.pedido_temporal = []
+                st.rerun()
+            except Exception as e:
+                st.error(f"Error al guardar: {e}")
