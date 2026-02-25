@@ -1,10 +1,17 @@
 import streamlit as st
-from streamlit_gsheets import GSheetsConnection
+from supabase import create_client, Client
 import pandas as pd
 from datetime import datetime
 
 # 🎨 Configuración de pantalla
 st.set_page_config(page_title="Restaurante Santos", layout="wide")
+
+# ==========================================
+# CONFIGURACIÓN DE SUPABASE ⚡
+# ==========================================
+URL_SUPABASE = "https://luklxueplpxdktreuloa.supabase.co"
+KEY_SUPABASE = "sb_publishable_KxAtLO6z0_4SUtbpQDWekQ_mKXZZebX"
+supabase: Client = create_client(URL_SUPABASE, KEY_SUPABASE)
 
 # CSS para que el Pedido FLOTE
 st.markdown("""
@@ -20,21 +27,21 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-URL_DIRECTA = "https://docs.google.com/spreadsheets/d/1Y6y_hTRG-FJ6RdWfF6vETzxpyHBKvCLG9GgXa4eelbM/edit#gid=0"
-conn = st.connection("gsheets", type=GSheetsConnection)
-
 # --- MEMORIA Y CACHÉ ---
 if 'pedido_temporal' not in st.session_state:
     st.session_state.pedido_temporal = []
 if 'modo_editor' not in st.session_state:
     st.session_state.modo_editor = False
 
-@st.cache_data(ttl=600)
+@st.cache_data(ttl=60)
 def leer_menu_rapido():
+    """Lee el menú directamente desde la tabla SQL 'menu_dia'"""
     try: 
-        return conn.read(spreadsheet=URL_DIRECTA, worksheet="Menu_Dia", ttl=0).dropna(how="all")
+        response = supabase.table("menu_dia").select("*").execute()
+        df = pd.DataFrame(response.data)
+        return df if not df.empty else pd.DataFrame(columns=["id", "categoria", "producto", "monto"])
     except: 
-        return pd.DataFrame(columns=["Categoria", "Producto", "Monto"])
+        return pd.DataFrame(columns=["id", "categoria", "producto", "monto"])
 
 # --- VENTANAS FLOTANTES (MODALES) ---
 @st.dialog("➕ Nuevo Producto")
@@ -43,9 +50,12 @@ def modal_nuevo(cat):
     p = st.number_input("Precio ($)", min_value=0, step=100)
     if st.button("Guardar"):
         if n and p > 0:
-            df_act = leer_menu_rapido()
-            df_n = pd.DataFrame([{"Categoria": cat, "Producto": n, "Monto": int(p)}])
-            conn.update(spreadsheet=URL_DIRECTA, worksheet="Menu_Dia", data=pd.concat([df_act, df_n], ignore_index=True))
+            # Insertar en SQL
+            supabase.table("menu_dia").insert({
+                "categoria": cat, 
+                "producto": n, 
+                "monto": int(p)
+            }).execute()
             st.cache_data.clear() 
             st.rerun()
 
@@ -55,7 +65,11 @@ def modal_recarga():
     m = st.number_input("Monto ($)", min_value=0, step=500)
     if st.button("Agregar al Pedido"):
         if m > 0:
-            st.session_state.pedido_temporal.append({"Categoria": "Recarga", "Producto": f"Recarga {op}", "Monto": int(m)})
+            st.session_state.pedido_temporal.append({
+                "categoria": "Recarga", 
+                "producto": f"Recarga {op}", 
+                "monto": int(m)
+            })
             st.rerun()
 
 @st.dialog("📦 Venta Especial")
@@ -64,7 +78,11 @@ def modal_otros():
     m = st.number_input("Monto ($)", min_value=0, step=100)
     if st.button("Agregar al Pedido"):
         if desc and m > 0:
-            st.session_state.pedido_temporal.append({"Categoria": "Otros", "Producto": desc, "Monto": int(m)})
+            st.session_state.pedido_temporal.append({
+                "categoria": "Otros", 
+                "producto": desc, 
+                "monto": int(m)
+            })
             st.rerun()
 
 @st.dialog("💸 Gasto")
@@ -73,9 +91,13 @@ def modal_gastos():
     d = st.text_input("Descripción")
     o = st.selectbox("Saco De:", ["Comida", "Bebestible", "Tienda", "Recarga", "Chela", "Otros", "Caja General"])
     if st.button("Guardar Gasto"):
-        df_g = pd.DataFrame([{"Fecha": datetime.now().strftime("%Y-%m-%d %H:%M"), "Monto": int(m), "Descripcion": d, "Saco De": o}])
-        df_act = conn.read(spreadsheet=URL_DIRECTA, worksheet="Gastos", ttl=0).dropna(how="all")
-        conn.update(spreadsheet=URL_DIRECTA, worksheet="Gastos", data=pd.concat([df_act, df_g], ignore_index=True))
+        # Insertar gasto en SQL
+        supabase.table("gastos").insert({
+            "monto": int(m), 
+            "descripcion": d, 
+            "origen": o
+        }).execute()
+        st.success("Gasto guardado")
         st.rerun()
 
 # --- INTERFAZ ---
@@ -84,7 +106,7 @@ c1, c2, c3 = st.columns([2, 1, 1])
 c1.title("🍴 Restaurante Santos")
 if c2.button("💸 GASTOS", use_container_width=True): modal_gastos()
 
-if c1.button("🔄 Sincronizar Excel"):
+if c1.button("🔄 Sincronizar Datos"):
     st.cache_data.clear()
     st.rerun()
 
@@ -107,18 +129,25 @@ with col_m:
             with grid[0]:
                 if st.button("📦\n\nVENTA ESPECIAL", use_container_width=True): modal_otros()
         else:
-            items = df_menu[df_menu["Categoria"] == cat]
+            # Filtrar por categoría (SQL usa minúsculas normalmente)
+            items = df_menu[df_menu["categoria"] == cat]
             for i, (idx, row) in enumerate(items.iterrows()):
                 with grid[i % 5]:
                     if st.session_state.modo_editor:
-                        if st.button("❌", key=f"d_{idx}"):
-                            conn.update(spreadsheet=URL_DIRECTA, worksheet="Menu_Dia", data=df_menu.drop(idx))
+                        if st.button("❌", key=f"d_{row['id']}"):
+                            supabase.table("menu_dia").delete().eq("id", row['id']).execute()
                             st.cache_data.clear()
                             st.rerun()
-                    p_f = f"${int(row['Monto']):,}".replace(",", ".")
-                    if st.button(f"{row['Producto']}\n\n{p_f}", key=f"b_{idx}", use_container_width=True):
-                        st.session_state.pedido_temporal.append(row.to_dict())
+                    
+                    p_f = f"${int(row['monto']):,}".replace(",", ".")
+                    if st.button(f"{row['producto']}\n\n{p_f}", key=f"b_{row['id']}", use_container_width=True):
+                        st.session_state.pedido_temporal.append({
+                            "categoria": row['categoria'],
+                            "producto": row['producto'],
+                            "monto": row['monto']
+                        })
                         st.rerun()
+            
             if st.session_state.modo_editor:
                 with grid[len(items) % 5]:
                     if st.button(f"➕\n\nNuevo\n{titulo}", key=f"a_{cat}", use_container_width=True):
@@ -138,12 +167,12 @@ with col_m:
 
 with col_p:
     st.subheader("📝 Pedido Actual")
-    total = sum(int(i["Monto"]) for i in st.session_state.pedido_temporal)
+    total = sum(int(i["monto"]) for i in st.session_state.pedido_temporal)
     
     for i, item in enumerate(st.session_state.pedido_temporal):
-        p_i = f"${int(item['Monto']):,}".replace(",", ".")
+        p_i = f"${int(item['monto']):,}".replace(",", ".")
         col_txt, col_del = st.columns([4, 1])
-        col_txt.write(f"• {item['Producto']} ({p_i})")
+        col_txt.write(f"• {item['producto']} ({p_i})")
         if col_del.button("🗑️", key=f"del_ped_{i}"):
             st.session_state.pedido_temporal.pop(i)
             st.rerun()
@@ -151,38 +180,25 @@ with col_p:
     st.divider()
     st.markdown(f"## TOTAL: ${total:,}".replace(",", "."))
     
-    # ==========================================
-    # BOTÓN FINALIZAR VENTA CON LÓGICA DE IMPRESIÓN
-    # ==========================================
     if st.button("✅ FINALIZAR VENTA", type="primary", use_container_width=True):
         if st.session_state.pedido_temporal:
-            df_v = pd.DataFrame(st.session_state.pedido_temporal)
-            ahora = datetime.now()
-            
-            # 1. Asignar datos obligatorios
-            df_v["ID_Venta"] = ahora.strftime("%Y%m%d%H%M%S")
-            df_v["Fecha"] = ahora.strftime("%Y-%m-%d")
-            df_v["Hora"] = ahora.strftime("%H:%M:%S")
-            df_v["Tipo"] = "PAGADO"
-            
-            # 2. Filtrar qué se imprime (Solo categorías de comida)
-            #
-            categorias_imprimibles = ["Desayuno", "Almuerzo", "Cena"]
-            df_v["Estado_Impresion"] = df_v["Categoria"].apply(
-                lambda x: "PENDIENTE" if x in categorias_imprimibles else "N/A"
-            )
-            
-            # 3. Organizar columnas según tu mapeo de Excel (A hasta H)
-            #
-            df_v = df_v[["ID_Venta", "Fecha", "Hora", "Categoria", "Producto", "Monto", "Tipo", "Estado_Impresion"]]
-            
-            # 4. Guardar en la nube (Hoja 1)
             try:
-                df_h = conn.read(spreadsheet=URL_DIRECTA, worksheet="Hoja 1", ttl=0).dropna(how="all")
-                conn.update(spreadsheet=URL_DIRECTA, worksheet="Hoja 1", data=pd.concat([df_h, df_v], ignore_index=True))
+                # Preparar datos para insertar en la tabla 'ventas'
+                ventas_to_insert = []
+                for item in st.session_state.pedido_temporal:
+                    ventas_to_insert.append({
+                        "producto": item["producto"],
+                        "monto": int(item["monto"]),
+                        "categoria": item["categoria"],
+                        "tipo": "PAGADO",
+                        "estado_impresion": "PENDIENTE" if item["categoria"] in ["Desayuno", "Almuerzo", "Cena"] else "N/A"
+                    })
                 
-                st.success("✅ Venta registrada correctamente.")
+                # Insertar en Supabase 🚀
+                supabase.table("ventas").insert(ventas_to_insert).execute()
+                
+                st.success("✅ Venta registrada en SQL.")
                 st.session_state.pedido_temporal = []
                 st.rerun()
             except Exception as e:
-                st.error(f"Error al guardar: {e}")
+                st.error(f"Error al guardar en SQL: {e}")
