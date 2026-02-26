@@ -33,7 +33,8 @@ if 'pedido_temporal' not in st.session_state:
 if 'modo_editor' not in st.session_state:
     st.session_state.modo_editor = False
 
-@st.cache_data(ttl=60)
+# 🚀 ACELERADO: Bajamos el ttl a 2 para que refresque casi al instante
+@st.cache_data(ttl=2)
 def leer_menu_rapido():
     """Lee el menú directamente desde la tabla SQL 'menu_dia'"""
     try: 
@@ -50,7 +51,7 @@ def modal_nuevo(cat):
     p = st.number_input("Precio ($)", min_value=0, step=100)
     if st.button("Guardar"):
         if n and p > 0:
-            # Insertar en SQL
+            # Insertar en SQL (minúsculas)
             supabase.table("menu_dia").insert({
                 "categoria": cat, 
                 "producto": n, 
@@ -91,7 +92,7 @@ def modal_gastos():
     d = st.text_input("Descripción")
     o = st.selectbox("Saco De:", ["Comida", "Bebestible", "Tienda", "Recarga", "Chela", "Otros", "Caja General"])
     if st.button("Guardar Gasto"):
-        # Insertar gasto en SQL
+        # 🛡️ CORREGIDO: Aseguramos tabla 'gastos' en minúscula
         supabase.table("gastos").insert({
             "monto": int(m), 
             "descripcion": d, 
@@ -129,7 +130,6 @@ with col_m:
             with grid[0]:
                 if st.button("📦\n\nVENTA ESPECIAL", use_container_width=True): modal_otros()
         else:
-            # Filtrar por categoría (SQL usa minúsculas normalmente)
             items = df_menu[df_menu["categoria"] == cat]
             for i, (idx, row) in enumerate(items.iterrows()):
                 with grid[i % 5]:
@@ -183,7 +183,7 @@ with col_p:
     if st.button("✅ FINALIZAR VENTA", type="primary", use_container_width=True):
         if st.session_state.pedido_temporal:
             try:
-                # Preparar datos para insertar en la tabla 'ventas'
+                # Preparar datos
                 ventas_to_insert = []
                 for item in st.session_state.pedido_temporal:
                     ventas_to_insert.append({
@@ -194,10 +194,10 @@ with col_p:
                         "estado_impresion": "PENDIENTE" if item["categoria"] in ["Desayuno", "Almuerzo", "Cena"] else "N/A"
                     })
                 
-                # Insertar en Supabase 🚀
+                # 🛡️ CORREGIDO: Tabla 'ventas' en minúscula
                 supabase.table("ventas").insert(ventas_to_insert).execute()
                 
-                st.success("✅ Venta registrada en SQL.")
+                st.success("✅ Venta registrada correctamente.")
                 st.session_state.pedido_temporal = []
                 st.rerun()
             except Exception as e:
