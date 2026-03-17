@@ -134,7 +134,7 @@ with col_m:
     mostrar_seccion("📦 OTROS", "Otros", especial="Otros")
 
 with col_p:
-    st.subheader("📝 Pedido")
+    st.subheader("📝 Pedido Actual")
     total = sum(int(i["monto"]) for i in st.session_state.pedido_temporal)
     
     for i, item in enumerate(st.session_state.pedido_temporal):
@@ -152,6 +152,8 @@ with col_p:
         if st.session_state.pedido_temporal:
             try:
                 ventas_to_insert = []
+                html_tickets = "" 
+
                 for item in st.session_state.pedido_temporal:
                     es_comida = item["categoria"] in ["Desayuno", "Almuerzo", "Cena"]
                     ventas_to_insert.append({
@@ -159,41 +161,38 @@ with col_p:
                         "monto": int(item["monto"]),
                         "categoria": item["categoria"],
                         "tipo": "PAGADO",
-                        "estado_impresion": "IMPRESO" if es_comida else "N/A"
+                        "estado_impresion": "PENDIENTE" if es_comida else "N/A"
                     })
-
-                supabase.table("ventas").insert(ventas_to_insert).execute()
-
-                # 🖨️ Mandar a imprimir cada plato por separado
-                for item in st.session_state.pedido_temporal:
-                    if item["categoria"] in ["Desayuno", "Almuerzo", "Cena"]:
-                        # DISEÑO NUEVO: Nombre local izquierda, Plato centro, Fecha abajo
-                        ticket_html = f"""
-                        <div style="width: 180px; font-family: sans-serif; padding: 0; margin: 0;">
-                            <div style="font-size: 10px; text-align: left; margin-bottom: 5px;">Restaurante Santos</div>
-                            <div style="text-align: center;">
-                                <h2 style="font-size: 22px; margin: 2px 0; font-weight: bold; text-transform: uppercase;">{item['producto']}</h2>
-                                <p style="font-size: 10px; margin: 0; color: #333;">({item['categoria']})</p>
+                    
+                    # Creamos una ficha por cada plato de comida
+                    if es_comida:
+                        html_tickets += f"""
+                        <div style="page-break-after: always; width: 100%; font-family: sans-serif; padding: 10px; border-bottom: 1px dashed #000;">
+                            <div style="font-size: 10px; text-align: left;">Restaurante Santos</div>
+                            <div style="text-align: center; margin-top: 5px;">
+                                <h1 style="font-size: 28px; margin: 0; font-weight: bold;">{item['producto']}</h1>
+                                <p style="font-size: 12px; margin: 0;">({item['categoria'].upper()})</p>
                             </div>
                         </div>
                         """
-                        # JS para imprimir SIN encabezados del navegador
-                        js_print = f"""
-                        <script>
-                        var frame = document.createElement('iframe');
-                        frame.style.display = 'none';
-                        document.body.appendChild(frame);
-                        var d = frame.contentWindow.document;
-                        d.write('<html><head><style>@page {{ margin: 0; }} body {{ margin: 0.5cm; }}</style></head><body onload="window.print();">{ticket_html}</body></html>');
-                        d.close();
-                        </script>
-                        """
-                        components.html(js_print, height=0)
-                        time.sleep(0.4) 
-
-                st.success("✅ Venta Guardada e Impresa.")
+                
+                # 1. Guardar en Supabase
+                supabase.table("ventas").insert(ventas_to_insert).execute()
+                
+                # 2. Imprimir con el método que sí funcionó (Pop-up rápido)
+                if html_tickets:
+                    js_print = f"""
+                    <script>
+                    var win = window.open('', '_blank', 'width=300,height=400');
+                    win.document.write('<html><head><style>@page {{ margin: 0; }}</style></head><body style="margin:0;" onload="window.print();window.close();">{html_tickets}</body></html>');
+                    win.document.close();
+                    </script>
+                    """
+                    components.html(js_print, height=0)
+                
+                st.success("✅ Venta Guardada")
                 st.session_state.pedido_temporal = []
-                time.sleep(1)
+                time.sleep(1.5) # Pausa para que el papel salga antes de limpiar
                 st.rerun()
 
             except Exception as e:
