@@ -119,7 +119,9 @@ with col_m:
                         st.rerun()
             if st.session_state.modo_editor:
                 with grid[len(items) % 5]:
-                    if st.button(f"➕\n\nNuevo\n{titulo}", key=f"a_{cat}", use_container_width=True): modal_nuevo(cat)
+                    # Corregido el error de f-string
+                    if st.button("➕\n\nNuevo\n" + titulo, key="a_" + cat, use_container_width=True):
+                        modal_nuevo(cat)
 
     with st.expander("🍔 COMIDA", expanded=True):
         t1, t2, t3 = st.tabs(["🍳 Desayuno", "🍲 Almuerzo", "🌙 Cena"])
@@ -152,8 +154,8 @@ with col_p:
         if st.session_state.pedido_temporal:
             try:
                 ventas_to_insert = []
-                tickets_data = [] # Nueva lista para pasar a JS
-                
+                html_tickets = "" 
+
                 for item in st.session_state.pedido_temporal:
                     es_comida = item["categoria"] in ["Desayuno", "Almuerzo", "Cena"]
                     ventas_to_insert.append({
@@ -163,71 +165,41 @@ with col_p:
                         "tipo": "PAGADO",
                         "estado_impresion": "PENDIENTE" if es_comida else "N/A"
                     })
+                    
                     if es_comida:
-                        tickets_data.append({"cat": item['categoria'].upper(), "prod": item['producto'].upper()})
-
-                # 1. Guardar en Supabase
-                supabase.table("ventas").insert(ventas_to_insert).execute()
-                
-                # 2. Imprimir con JS (Usa la hora de tu PC y ahorra papel)
-                if tickets_data:
-                    # Construir el HTML de los tickets dinámicamente
-                    tickets_html = ""
-                    for t in tickets_data:
-                        tickets_html += f"""
-                        <div class='ticket'>
-                            <div class='header'>Restaurante Santos</div>
-                            <div class='center'>
-                                <p class='cat'>{t['cat']}</p>
-                                <h1 class='prod'>{t['prod']}</h1>
-                                <p id='fecha-hora' class='time'></p>
+                        # DISEÑO SOLICITADO
+                        html_tickets += f"""
+                        <div style='page-break-after: always; font-family: sans-serif; width: 100%; padding: 0; margin: 0;'>
+                            <div style='font-size: 10px; text-align: left;'>Restaurante Santos</div>
+                            <div style='text-align: center; margin-top: 5px;'>
+                                <p style='font-size: 11px; margin: 0; text-transform: uppercase;'>{item['categoria']}</p>
+                                <h1 style='font-size: 24px; margin: 2px 0; font-weight: bold;'>{item['producto'].upper()}</h1>
+                                <p style='font-size: 10px; margin: 0;' class='la-fecha'></p>
                             </div>
                         </div>
                         """
-                    
+                
+                # 1. Guardar en Supabase
+                supabase.table("ventas").insert(ventas_to_insert).execute()
+                
+                # 2. Imprimir con el método de ventana rápida (el que funcionó)
+                if html_tickets:
+                    # Usamos JS para poner la hora de tu PC
                     js_print = f"""
                     <script>
-                    var frame = document.createElement('iframe');
-                    frame.style.display = 'none';
-                    document.body.appendChild(frame);
-                    var d = frame.contentWindow.document;
+                    var win = window.open('', '_blank', 'width=300,height=400');
                     var ahora = new Date().toLocaleString('es-CL', {{ day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit' }});
-                    
-                    var content = `
-                    <html>
-                    <head>
-                        <style>
-                            @page {{ margin: 0; }}
-                            body {{ margin: 0; padding: 5px; font-family: sans-serif; width: 180px; }}
-                            .ticket {{ page-break-after: always; padding: 2px 0; margin-bottom: 5px; }}
-                            .header {{ font-size: 10px; text-align: left; }}
-                            .center {{ text-align: center; }}
-                            .cat {{ font-size: 12px; margin: 2px 0; }}
-                            .prod {{ font-size: 24px; margin: 2px 0; font-weight: bold; }}
-                            .time {{ font-size: 10px; margin: 0; }}
-                        </style>
-                    </head>
-                    <body>
-                        {tickets_html}
-                        <script>
-                            // Inyectar la hora real en todos los tickets
-                            document.querySelectorAll('#fecha-hora').forEach(el => el.innerHTML = ahora);
-                            window.print();
-                        </script>
-                    </body>
-                    </html>`;
-                    
-                    d.write(content);
-                    d.close();
+                    var doc = `<html><body style='margin:0;' onload='document.querySelectorAll(".la-fecha").forEach(el=>el.innerHTML=ahora); window.print(); window.close();'>{html_tickets}</body></html>`;
+                    win.document.write(doc);
+                    win.document.close();
                     </script>
                     """
                     components.html(js_print, height=0)
-                    st.success("✅ Venta Guardada e Impresa.")
-                    time.sleep(1.5) 
-                else:
-                    st.success("✅ Venta Guardada.")
-
+                
+                st.success("✅ Venta Guardada")
                 st.session_state.pedido_temporal = []
+                time.sleep(1.5) 
                 st.rerun()
+
             except Exception as e:
                 st.error(f"Error: {e}")
