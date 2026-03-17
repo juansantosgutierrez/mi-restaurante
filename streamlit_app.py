@@ -120,9 +120,8 @@ with col_m:
             
             if st.session_state.modo_editor:
                 with grid[len(items) % 5]:
-                    # ✅ CORREGIDO: Sin f-string para evitar el SyntaxError
-                    btn_label = "➕\n\nNuevo\n" + str(titulo)
-                    if st.button(btn_label, key="add_" + cat, use_container_width=True):
+                    nombre_btn = "➕\n\nNuevo\n" + str(titulo)
+                    if st.button(nombre_btn, key="btn_add_" + cat, use_container_width=True):
                         modal_nuevo(cat)
 
     with st.expander("🍔 COMIDA", expanded=True):
@@ -169,21 +168,30 @@ with col_p:
                     })
                     
                     if es_comida:
-                        # DISEÑO COMPACTO: TIPO ARRIBA, PRODUCTO ABAJO
+                        # DISEÑO: CATEGORÍA ARRIBA, PRODUCTO ABAJO
                         html_tickets += f"""
-                        <div style="text-align: center; font-family: sans-serif; width: 100%; border-bottom: 1px solid transparent; padding: 2px 0;">
+                        <div style="page-break-after: always; text-align: center; width: 100%; font-family: sans-serif;">
                             <p style="font-size: 14px; margin: 0; text-transform: uppercase;">{item['categoria']}</p>
-                            <h1 style="font-size: 28px; margin: 0; font-weight: bold; text-transform: uppercase;">{item['producto']}</h1>
+                            <h1 style="font-size: 28px; margin: 2px 0; font-weight: bold; text-transform: uppercase;">{item['producto']}</h1>
                         </div>
                         """
 
                 # 1. Guardar en SQL
                 supabase.table("ventas").insert(ventas_to_insert).execute()
                 
-                # 2. Imprimir (Márgenes mínimos para que Google ponga lo suyo y NO gaste papel)
+                # 2. Imprimir (Margen arriba para Google, margen abajo cero para ahorrar)
                 if html_tickets:
-                    # Quitamos el 'page-break-after' y usamos márgenes mínimos
-                    estilo = "<style>@page { margin: 0.1cm; size: auto; } body { margin: 0; padding: 0; }</style>"
+                    estilo = """
+                    <style>
+                        @page { 
+                            margin-top: 0.8cm; 
+                            margin-bottom: 0cm; 
+                            margin-left: 0.1cm; 
+                            margin-right: 0.1cm; 
+                        } 
+                        body { margin: 0; padding: 0; }
+                    </style>
+                    """
                     components.html(f"{estilo}<script>window.print();</script>{html_tickets}", height=0)
                     st.success("✅ Venta registrada e impresión enviada.")
                     time.sleep(2) 
