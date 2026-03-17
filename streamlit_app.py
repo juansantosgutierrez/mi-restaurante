@@ -120,8 +120,8 @@ with col_m:
             
             if st.session_state.modo_editor:
                 with grid[len(items) % 5]:
-                    label = "➕\n\nNuevo\n" + str(titulo)
-                    if st.button(label, key="add_" + cat, use_container_width=True):
+                    btn_label = "➕\n\nNuevo\n" + str(titulo)
+                    if st.button(btn_label, key="add_btn_" + cat, use_container_width=True):
                         modal_nuevo(cat)
 
     with st.expander("🍔 COMIDA", expanded=True):
@@ -168,18 +168,18 @@ with col_p:
                     })
                     
                     if es_comida:
-                        # DISEÑO: TIPO ARRIBA (achicado) y PRODUCTO ABAJO
+                        # DISEÑO: PRODUCTO ARRIBA, TIPO ABAJO EN PARÉNTESIS
                         html_tickets += f"""
                         <div style="page-break-after: always; text-align: center; width: 100%; font-family: sans-serif; padding: 0; margin: 0;">
-                            <p style="font-size: 10px; margin: 0; text-transform: uppercase; color: #333;">{item['categoria']}</p>
-                            <h1 style="font-size: 26px; margin: 2px 0; font-weight: bold; text-transform: uppercase;">{item['producto']}</h1>
+                            <h1 style="font-size: 26px; margin: 0; font-weight: bold; text-transform: uppercase;">{item['producto']}</h1>
+                            <p style="font-size: 11px; margin: 2px 0; text-transform: uppercase; color: #333;">({item['categoria']})</p>
                         </div>
                         """
 
                 # 1. Guardar en SQL
                 supabase.table("ventas").insert(ventas_to_insert).execute()
                 
-                # 2. Imprimir (Margen arriba generoso para Google, margen abajo cero)
+                # 2. Imprimir (Margen arriba 1.2cm para Google, abajo cero para ahorrar)
                 if html_tickets:
                     estilo = """
                     <style>
