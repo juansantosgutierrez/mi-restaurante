@@ -2,8 +2,8 @@ import streamlit as st
 from supabase import create_client, Client
 import pandas as pd
 from datetime import datetime
-import streamlit.components.v1 as components # <--- LÍNEA MÁGICA 1
-import time # <--- LÍNEA MÁGICA 2
+import streamlit.components.v1 as components
+import time
 
 # 🎨 Configuración de pantalla
 st.set_page_config(page_title="Restaurante Santos", layout="wide")
@@ -18,18 +18,12 @@ supabase: Client = create_client(URL_SUPABASE, KEY_SUPABASE)
 # CSS para que el Pedido FLOTE
 st.markdown("""
     <style>
-    [data-testid="stSidebarUserContent"] {
-        padding-top: 1rem;
-    }
-    .stColumn > div {
-        position: sticky;
-        top: 50px;
-        height: auto;
-    }
+    [data-testid="stSidebarUserContent"] { padding-top: 1rem; }
+    .stColumn > div { position: sticky; top: 50px; height: auto; }
     </style>
 """, unsafe_allow_html=True)
 
-# --- MEMORIA Y CACHÉ ---
+# --- MEMORIA ---
 if 'pedido_temporal' not in st.session_state:
     st.session_state.pedido_temporal = []
 if 'modo_editor' not in st.session_state:
@@ -44,7 +38,7 @@ def leer_menu_rapido():
     except: 
         return pd.DataFrame(columns=["id", "categoria", "producto", "monto"])
 
-# --- VENTANAS FLOTANTES (MODALES) ---
+# --- MODALES ---
 @st.dialog("➕ Nuevo Producto")
 def modal_nuevo(cat):
     n = st.text_input(f"Nombre del {cat}")
@@ -140,14 +134,14 @@ with col_m:
     mostrar_seccion("📦 OTROS", "Otros", especial="Otros")
 
 with col_p:
-    st.subheader("📝 Pedido Actual")
+    st.subheader("📝 Pedido")
     total = sum(int(i["monto"]) for i in st.session_state.pedido_temporal)
     
     for i, item in enumerate(st.session_state.pedido_temporal):
         p_i = f"${int(item['monto']):,}".replace(",", ".")
-        col_txt, col_del = st.columns([4, 1])
-        col_txt.write(f"• {item['producto']} ({p_i})")
-        if col_del.button("🗑️", key=f"del_ped_{i}"):
+        ctx, cbt = st.columns([4, 1])
+        ctx.write(f"• {item['producto']} ({p_i})")
+        if cbt.button("🗑️", key=f"del_ped_{i}"):
             st.session_state.pedido_temporal.pop(i)
             st.rerun()
             
@@ -157,11 +151,7 @@ with col_p:
     if st.button("✅ FINALIZAR VENTA", type="primary", use_container_width=True):
         if st.session_state.pedido_temporal:
             try:
-                # 1. Preparar datos y ticket
-                ahora = datetime.now().strftime("%d/%m/%Y %H:%M")
                 ventas_to_insert = []
-                html_ticket = ""
-                
                 for item in st.session_state.pedido_temporal:
                     es_comida = item["categoria"] in ["Desayuno", "Almuerzo", "Cena"]
                     ventas_to_insert.append({
@@ -169,23 +159,42 @@ with col_p:
                         "monto": int(item["monto"]),
                         "categoria": item["categoria"],
                         "tipo": "PAGADO",
-                        "estado_impresion": "PENDIENTE" if es_comida else "N/A"
+                        "estado_impresion": "IMPRESO" if es_comida else "N/A"
                     })
-                    if es_comida:
-                        html_ticket += f"<div style='text-align:center;font-family:sans-serif;border-bottom:1px dashed #000;padding:10px;'><p style='font-size:14px;margin:0;'>{item['categoria'].upper()}</p><h1 style='font-size:35px;margin:5px 0;'>{item['producto']}</h1><p style='font-size:12px;margin:0;'>{ahora}</p></div>"
 
-                # 2. Guardar en SQL
                 supabase.table("ventas").insert(ventas_to_insert).execute()
-                
-                # 3. Disparar impresión si hay comida
-                if html_ticket:
-                    components.html(f"<script>window.print();</script>{html_ticket}", height=0)
-                    st.success("✅ Venta registrada e impresión enviada.")
-                    time.sleep(2) # <--- EL SECRETO: Esperar 2 segundos para que Chrome imprima
-                else:
-                    st.success("✅ Venta registrada correctamente.")
 
+                # 🖨️ Mandar a imprimir cada plato por separado
+                for item in st.session_state.pedido_temporal:
+                    if item["categoria"] in ["Desayuno", "Almuerzo", "Cena"]:
+                        # DISEÑO NUEVO: Nombre local izquierda, Plato centro, Fecha abajo
+                        ticket_html = f"""
+                        <div style="width: 180px; font-family: sans-serif; padding: 0; margin: 0;">
+                            <div style="font-size: 10px; text-align: left; margin-bottom: 5px;">Restaurante Santos</div>
+                            <div style="text-align: center;">
+                                <h2 style="font-size: 22px; margin: 2px 0; font-weight: bold; text-transform: uppercase;">{item['producto']}</h2>
+                                <p style="font-size: 10px; margin: 0; color: #333;">({item['categoria']})</p>
+                            </div>
+                        </div>
+                        """
+                        # JS para imprimir SIN encabezados del navegador
+                        js_print = f"""
+                        <script>
+                        var frame = document.createElement('iframe');
+                        frame.style.display = 'none';
+                        document.body.appendChild(frame);
+                        var d = frame.contentWindow.document;
+                        d.write('<html><head><style>@page {{ margin: 0; }} body {{ margin: 0.5cm; }}</style></head><body onload="window.print();">{ticket_html}</body></html>');
+                        d.close();
+                        </script>
+                        """
+                        components.html(js_print, height=0)
+                        time.sleep(0.4) 
+
+                st.success("✅ Venta Guardada e Impresa.")
                 st.session_state.pedido_temporal = []
+                time.sleep(1)
                 st.rerun()
+
             except Exception as e:
-                st.error(f"Error al guardar en SQL: {e}")
+                st.error(f"Error: {e}")
