@@ -3,6 +3,7 @@ from supabase import create_client, Client
 import pandas as pd
 from datetime import datetime
 import streamlit.components.v1 as components
+import time  # <--- Nuevo: para dar tiempo a la impresora
 
 # 🎨 Configuración de pantalla
 st.set_page_config(page_title="Restaurante Santos", layout="wide")
@@ -50,11 +51,7 @@ def modal_nuevo(cat):
     p = st.number_input("Precio ($)", min_value=0, step=100)
     if st.button("Guardar"):
         if n and p > 0:
-            supabase.table("menu_dia").insert({
-                "categoria": cat, 
-                "producto": n, 
-                "monto": int(p)
-            }).execute()
+            supabase.table("menu_dia").insert({"categoria": cat, "producto": n, "monto": int(p)}).execute()
             st.cache_data.clear() 
             st.rerun()
 
@@ -64,11 +61,7 @@ def modal_recarga():
     m = st.number_input("Monto ($)", min_value=0, step=500)
     if st.button("Agregar al Pedido"):
         if m > 0:
-            st.session_state.pedido_temporal.append({
-                "categoria": "Recarga", 
-                "producto": f"Recarga {op}", 
-                "monto": int(m)
-            })
+            st.session_state.pedido_temporal.append({"categoria": "Recarga", "producto": f"Recarga {op}", "monto": int(m)})
             st.rerun()
 
 @st.dialog("📦 Venta Especial")
@@ -77,11 +70,7 @@ def modal_otros():
     m = st.number_input("Monto ($)", min_value=0, step=100)
     if st.button("Agregar al Pedido"):
         if desc and m > 0:
-            st.session_state.pedido_temporal.append({
-                "categoria": "Otros", 
-                "producto": desc, 
-                "monto": int(m)
-            })
+            st.session_state.pedido_temporal.append({"categoria": "Otros", "producto": desc, "monto": int(m)})
             st.rerun()
 
 @st.dialog("💸 Gasto")
@@ -90,11 +79,7 @@ def modal_gastos():
     d = st.text_input("Descripción")
     o = st.selectbox("Saco De:", ["Comida", "Bebestible", "Tienda", "Recarga", "Chela", "Otros", "Caja General"])
     if st.button("Guardar Gasto"):
-        supabase.table("gastos").insert({
-            "monto": int(m), 
-            "descripcion": d, 
-            "origen": o
-        }).execute()
+        supabase.table("gastos").insert({"monto": int(m), "descripcion": d, "origen": o}).execute()
         st.success("Gasto guardado")
         st.rerun()
 
@@ -119,7 +104,6 @@ with col_m:
     def mostrar_seccion(titulo, cat, especial=None):
         st.header(titulo)
         grid = st.columns(5)
-        
         if especial == "Recarga":
             with grid[0]:
                 if st.button("📲\n\nRECARGAR", use_container_width=True): modal_recarga()
@@ -135,20 +119,13 @@ with col_m:
                             supabase.table("menu_dia").delete().eq("id", row['id']).execute()
                             st.cache_data.clear()
                             st.rerun()
-                    
                     p_f = f"${int(row['monto']):,}".replace(",", ".")
                     if st.button(f"{row['producto']}\n\n{p_f}", key=f"b_{row['id']}", use_container_width=True):
-                        st.session_state.pedido_temporal.append({
-                            "categoria": row['categoria'],
-                            "producto": row['producto'],
-                            "monto": row['monto']
-                        })
+                        st.session_state.pedido_temporal.append({"categoria": row['categoria'], "producto": row['producto'], "monto": row['monto']})
                         st.rerun()
-            
             if st.session_state.modo_editor:
                 with grid[len(items) % 5]:
-                    if st.button(f"➕\n\nNuevo\n{titulo}", key=f"a_{cat}", use_container_width=True):
-                        modal_nuevo(cat)
+                    if st.button(f"➕\n\nNuevo\n{titulo}", key=f"a_{cat}", use_container_width=True): modal_nuevo(cat)
 
     with st.expander("🍔 COMIDA", expanded=True):
         t1, t2, t3 = st.tabs(["🍳 Desayuno", "🍲 Almuerzo", "🌙 Cena"])
@@ -168,9 +145,9 @@ with col_p:
     
     for i, item in enumerate(st.session_state.pedido_temporal):
         p_i = f"${int(item['monto']):,}".replace(",", ".")
-        col_txt, col_del = st.columns([4, 1])
-        col_txt.write(f"• {item['producto']} ({p_i})")
-        if col_del.button("🗑️", key=f"del_ped_{i}"):
+        ctx, cbt = st.columns([4, 1])
+        ctx.write(f"• {item['producto']} ({p_i})")
+        if cbt.button("🗑️", key=f"del_ped_{i}"):
             st.session_state.pedido_temporal.pop(i)
             st.rerun()
             
@@ -180,16 +157,14 @@ with col_p:
     if st.button("✅ FINALIZAR VENTA", type="primary", use_container_width=True):
         if st.session_state.pedido_temporal:
             try:
-                # 🕒 Fecha y hora para el ticket
+                # 1. Preparar datos y ticket
                 ahora = datetime.now()
-                fecha_hora = ahora.strftime("%d/%m/%Y %H:%M")
-                
+                f_h = ahora.strftime("%d/%m/%Y %H:%M")
                 ventas_to_insert = []
                 html_ticket = "" 
 
                 for item in st.session_state.pedido_temporal:
                     es_comida = item["categoria"] in ["Desayuno", "Almuerzo", "Cena"]
-                    
                     ventas_to_insert.append({
                         "producto": item["producto"],
                         "monto": int(item["monto"]),
@@ -198,32 +173,36 @@ with col_p:
                         "estado_impresion": "PENDIENTE" if es_comida else "N/A"
                     })
 
-                    # Solo agregamos al ticket si es comida
                     if es_comida:
                         html_ticket += f"""
-                        <div style="text-align: center; font-family: sans-serif; border-bottom: 1px dashed black; padding: 10px; width: 100%;">
+                        <div style="text-align: center; font-family: Arial; border-bottom: 1px dashed black; padding: 10px; width: 100%;">
                             <p style="font-size: 14px; margin: 0;">{item['categoria'].upper()}</p>
-                            <h1 style="font-size: 32px; margin: 5px 0; font-weight: bold;">{item['producto']}</h1>
-                            <p style="font-size: 12px; margin: 0;">{fecha_hora}</p>
+                            <h1 style="font-size: 35px; margin: 5px 0; font-weight: bold;">{item['producto']}</h1>
+                            <p style="font-size: 12px; margin: 0;">{f_h}</p>
                         </div>
                         """
                 
-                # Guardar datos en Supabase
+                # 2. Guardar en Supabase primero
                 supabase.table("ventas").insert(ventas_to_insert).execute()
                 
-                # 🖨️ DISPARAR IMPRESIÓN (Método optimizado para Modo Kiosk)
+                # 3. Disparar Impresión
                 if html_ticket:
-                    js_code = f"""
+                    js_print = f"""
                     <script>
-                    var prnWin = window.open('', '_blank', 'width=300,height=400');
-                    prnWin.document.write('<html><body style="margin:0;" onload="window.print();window.close();">{html_ticket}</body></html>');
-                    prnWin.document.close();
+                    var win = window.open('', '_blank', 'width=300,height=400');
+                    win.document.write('<html><body style="margin:0;" onload="window.print();window.close();">{html_ticket}</body></html>');
+                    win.document.close();
                     </script>
                     """
-                    components.html(js_code, height=0)
-
-                st.success("✅ Venta registrada e impresión enviada.")
+                    components.html(js_print, height=0)
+                
+                # 4. Feedback y Limpieza con PAUSA
+                st.success("✅ Venta Guardada con éxito.")
                 st.session_state.pedido_temporal = []
+                
+                # Damos 2 segundos para que el JS actúe antes de recargar la página
+                time.sleep(2) 
                 st.rerun()
+
             except Exception as e:
                 st.error(f"Error: {e}")
