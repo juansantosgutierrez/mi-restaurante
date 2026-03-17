@@ -14,7 +14,7 @@ URL_SUPABASE = "https://luklxueplpxdktreuloa.supabase.co"
 KEY_SUPABASE = "sb_publishable_KxAtLO6z0_4SUtbpQDWekQ_mKXZZebX"
 supabase: Client = create_client(URL_SUPABASE, KEY_SUPABASE)
 
-# CSS para que el Pedido FLOTE
+# CSS para que el Pedido FLOTE y se vea bien
 st.markdown("""
     <style>
     [data-testid="stSidebarUserContent"] {
@@ -24,6 +24,10 @@ st.markdown("""
         position: sticky;
         top: 50px;
         height: auto;
+    }
+    /* Estilo para que el botón de finalizar resalte */
+    .stButton > button {
+        border-radius: 10px;
     }
     </style>
 """, unsafe_allow_html=True)
@@ -113,7 +117,7 @@ if c3.button(txt_btn, use_container_width=True):
     st.session_state.modo_editor = not st.session_state.modo_editor
     st.rerun()
 
-col_m, col_p = st.columns([3, 1])
+col_m, col_p = st.columns([3, 1.2]) # Un poco más ancho para el pedido
 
 with col_m:
     def mostrar_seccion(titulo, cat, especial=None):
@@ -162,13 +166,79 @@ with col_m:
     mostrar_seccion("🍺 CHELA", "Chela")
     mostrar_seccion("📦 OTROS", "Otros", especial="Otros")
 
+# --- COLUMNA DEL PEDIDO (DERECHA) ---
 with col_p:
     st.subheader("📝 Pedido Actual")
     total = sum(int(i["monto"]) for i in st.session_state.pedido_temporal)
     
+    # Mostrar productos en el pedido
     for i, item in enumerate(st.session_state.pedido_temporal):
         p_i = f"${int(item['monto']):,}".replace(",", ".")
-        col_txt, col_del = st.columns([4, 1])
-        col_txt.write(f"• {item['producto']} ({p_i})")
-        if col_del.button("🗑️", key=f"del_ped_{i}"):
+        ctx, cbt = st.columns([4, 1])
+        ctx.write(f"• {item['producto']} ({p_i})")
+        if cbt.button("🗑️", key=f"del_ped_{i}"):
             st.session_state.pedido_temporal.pop(i)
+            st.rerun()
+            
+    st.divider()
+    st.markdown(f"## TOTAL: ${total:,}".replace(",", "."))
+    
+    # BOTÓN FINALIZAR (Asegurado que aparezca)
+    if st.button("✅ FINALIZAR VENTA", type="primary", use_container_width=True):
+        if not st.session_state.pedido_temporal:
+            st.warning("⚠️ El pedido está vacío.")
+        else:
+            try:
+                ahora = datetime.now()
+                f_h = ahora.strftime("%d/%m/%Y %H:%M")
+                
+                ventas_to_insert = []
+                html_ticket = "" 
+
+                for item in st.session_state.pedido_temporal:
+                    es_comida = item["categoria"] in ["Desayuno", "Almuerzo", "Cena"]
+                    
+                    ventas_to_insert.append({
+                        "producto": item["producto"],
+                        "monto": int(item["monto"]),
+                        "categoria": item["categoria"],
+                        "tipo": "PAGADO",
+                        "estado_impresion": "PENDIENTE" if es_comida else "N/A"
+                    })
+
+                    if es_comida:
+                        html_ticket += f"""
+                        <div style="text-align: center; font-family: sans-serif; border-bottom: 1px dashed black; padding: 10px;">
+                            <p style="font-size: 14px; margin: 0;">{item['categoria'].upper()}</p>
+                            <h1 style="font-size: 32px; margin: 5px 0;">{item['producto']}</h1>
+                            <p style="font-size: 12px; margin: 0;">{f_h}</p>
+                        </div>
+                        """
+                
+                # Guardar en Supabase
+                supabase.table("ventas").insert(ventas_to_insert).execute()
+                
+                # IMPRESIÓN SILENCIOSA (Mejorada para no fallar)
+                if html_ticket:
+                    js_print = f"""
+                    <script>
+                    var ifr = document.createElement('iframe');
+                    ifr.style.display = 'none';
+                    document.body.appendChild(ifr);
+                    var d = ifr.contentWindow.document;
+                    d.write('<html><body style="margin:0;">{html_ticket}</body></html>');
+                    d.close();
+                    setTimeout(function(){{
+                        ifr.contentWindow.focus();
+                        ifr.contentWindow.print();
+                    }}, 400);
+                    </script>
+                    """
+                    components.html(js_print, height=0)
+
+                st.success("✅ ¡Venta guardada y ticket enviado!")
+                st.session_state.pedido_temporal = []
+                st.rerun()
+                
+            except Exception as e:
+                st.error(f"Error al guardar: {e}")
