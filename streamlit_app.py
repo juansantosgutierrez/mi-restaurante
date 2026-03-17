@@ -117,6 +117,84 @@ with col_m:
                     if st.button(f"{row['producto']}\n\n{p_f}", key=f"b_{row['id']}", use_container_width=True):
                         st.session_state.pedido_temporal.append({"categoria": row['categoria'], "producto": row['producto'], "monto": row['monto']})
                         st.rerun()
+            
             if st.session_state.modo_editor:
                 with grid[len(items) % 5]:
-                    if st.button(f"➕\
+                    if st.button(f"➕\n\nNuevo\n{titulo}", key=f"a_{cat}", use_container_width=True):
+                        modal_nuevo(cat)
+
+    with st.expander("🍔 COMIDA", expanded=True):
+        t1, t2, t3 = st.tabs(["🍳 Desayuno", "🍲 Almuerzo", "🌙 Cena"])
+        with t1: mostrar_seccion("Desayuno", "Desayuno")
+        with t2: mostrar_seccion("Almuerzo", "Almuerzo")
+        with t3: mostrar_seccion("Cena", "Cena")
+    
+    mostrar_seccion("🥤 BEBESTIBLE", "Bebestible")
+    mostrar_seccion("🏪 TIENDA", "Tienda")
+    mostrar_seccion("📲 RECARGA", "Recarga", especial="Recarga")
+    mostrar_seccion("🍺 CHELA", "Chela")
+    mostrar_seccion("📦 OTROS", "Otros", especial="Otros")
+
+with col_p:
+    st.subheader("📝 Pedido Actual")
+    total = sum(int(i["monto"]) for i in st.session_state.pedido_temporal)
+    
+    for i, item in enumerate(st.session_state.pedido_temporal):
+        p_i = f"${int(item['monto']):,}".replace(",", ".")
+        ctx, cbt = st.columns([4, 1])
+        ctx.write(f"• {item['producto']} ({p_i})")
+        if cbt.button("🗑️", key=f"del_ped_{i}"):
+            st.session_state.pedido_temporal.pop(i)
+            st.rerun()
+            
+    st.divider()
+    st.markdown(f"## TOTAL: ${total:,}".replace(",", "."))
+    
+    if st.button("✅ FINALIZAR VENTA", type="primary", use_container_width=True):
+        if st.session_state.pedido_temporal:
+            try:
+                # Hora de la PC
+                ahora = datetime.now().strftime("%d/%m/%Y %H:%M")
+                
+                ventas_to_insert = []
+                html_tickets = ""
+                
+                for item in st.session_state.pedido_temporal:
+                    es_comida = item["categoria"] in ["Desayuno", "Almuerzo", "Cena"]
+                    ventas_to_insert.append({
+                        "producto": item["producto"],
+                        "monto": int(item["monto"]),
+                        "categoria": item["categoria"],
+                        "tipo": "PAGADO",
+                        "estado_impresion": "PENDIENTE" if es_comida else "N/A"
+                    })
+                    
+                    if es_comida:
+                        # DISEÑO: Santos izq, Categoría arriba, Producto Centro, Hora abajo
+                        html_tickets += f"""
+                        <div style="page-break-after: always; font-family: sans-serif; width: 100%; padding: 0; margin: 0;">
+                            <div style="font-size: 10px; text-align: left;">Restaurante Santos</div>
+                            <div style="text-align: center; margin-top: 5px; border-bottom: 1px dashed #000; padding-bottom: 5px;">
+                                <p style="font-size: 12px; margin: 0; text-transform: uppercase;">{item['categoria']}</p>
+                                <h1 style="font-size: 26px; margin: 5px 0; font-weight: bold; text-transform: uppercase;">{item['producto']}</h1>
+                                <p style="font-size: 10px; margin: 0; color: #333;">{ahora}</p>
+                            </div>
+                        </div>
+                        """
+
+                # 1. Guardar en SQL
+                supabase.table("ventas").insert(ventas_to_insert).execute()
+                
+                # 2. Imprimir (Sin márgenes de Chrome)
+                if html_tickets:
+                    estilo = "<style>@page { margin: 0; size: auto; } body { margin: 0.2cm; }</style>"
+                    components.html(f"{estilo}<script>window.print();</script>{html_tickets}", height=0)
+                    st.success("✅ Venta registrada e impresión enviada.")
+                    time.sleep(2) 
+                else:
+                    st.success("✅ Venta registrada correctamente.")
+
+                st.session_state.pedido_temporal = []
+                st.rerun()
+            except Exception as e:
+                st.error(f"Error al guardar: {e}")
