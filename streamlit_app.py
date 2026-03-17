@@ -117,10 +117,12 @@ with col_m:
                     if st.button(f"{row['producto']}\n\n{p_f}", key=f"b_{row['id']}", use_container_width=True):
                         st.session_state.pedido_temporal.append({"categoria": row['categoria'], "producto": row['producto'], "monto": row['monto']})
                         st.rerun()
+            
             if st.session_state.modo_editor:
                 with grid[len(items) % 5]:
-                    # Corregido el error de f-string
-                    if st.button("➕\n\nNuevo\n" + titulo, key="a_" + cat, use_container_width=True):
+                    # Corregido para evitar el SyntaxError
+                    nombre_btn = "➕\n\nNuevo\n" + str(titulo)
+                    if st.button(nombre_btn, key="btn_new_" + cat, use_container_width=True):
                         modal_nuevo(cat)
 
     with st.expander("🍔 COMIDA", expanded=True):
@@ -136,7 +138,7 @@ with col_m:
     mostrar_seccion("📦 OTROS", "Otros", especial="Otros")
 
 with col_p:
-    st.subheader("📝 Pedido")
+    st.subheader("📝 Pedido Actual")
     total = sum(int(i["monto"]) for i in st.session_state.pedido_temporal)
     
     for i, item in enumerate(st.session_state.pedido_temporal):
@@ -154,8 +156,8 @@ with col_p:
         if st.session_state.pedido_temporal:
             try:
                 ventas_to_insert = []
-                html_tickets = "" 
-
+                html_tickets = ""
+                
                 for item in st.session_state.pedido_temporal:
                     es_comida = item["categoria"] in ["Desayuno", "Almuerzo", "Cena"]
                     ventas_to_insert.append({
@@ -167,39 +169,27 @@ with col_p:
                     })
                     
                     if es_comida:
-                        # DISEÑO SOLICITADO
+                        # PRODUCTO ARRIBA (Grande) y TIPO ABAJO (Chico)
                         html_tickets += f"""
-                        <div style='page-break-after: always; font-family: sans-serif; width: 100%; padding: 0; margin: 0;'>
-                            <div style='font-size: 10px; text-align: left;'>Restaurante Santos</div>
-                            <div style='text-align: center; margin-top: 5px;'>
-                                <p style='font-size: 11px; margin: 0; text-transform: uppercase;'>{item['categoria']}</p>
-                                <h1 style='font-size: 24px; margin: 2px 0; font-weight: bold;'>{item['producto'].upper()}</h1>
-                                <p style='font-size: 10px; margin: 0;' class='la-fecha'></p>
-                            </div>
+                        <div style="page-break-after: always; font-family: sans-serif; text-align: center; width: 100%; padding: 5px 0;">
+                            <h1 style="font-size: 28px; margin: 0; font-weight: bold; text-transform: uppercase;">{item['producto']}</h1>
+                            <p style="font-size: 14px; margin: 2px 0; text-transform: uppercase;">{item['categoria']}</p>
                         </div>
                         """
-                
-                # 1. Guardar en Supabase
+
+                # 1. Guardar en SQL
                 supabase.table("ventas").insert(ventas_to_insert).execute()
                 
-                # 2. Imprimir con el método de ventana rápida (el que funcionó)
+                # 2. Imprimir (Sin forzar márgenes 0 para que Google ponga la fecha/nombre)
                 if html_tickets:
-                    # Usamos JS para poner la hora de tu PC
-                    js_print = f"""
-                    <script>
-                    var win = window.open('', '_blank', 'width=300,height=400');
-                    var ahora = new Date().toLocaleString('es-CL', {{ day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit' }});
-                    var doc = `<html><body style='margin:0;' onload='document.querySelectorAll(".la-fecha").forEach(el=>el.innerHTML=ahora); window.print(); window.close();'>{html_tickets}</body></html>`;
-                    win.document.write(doc);
-                    win.document.close();
-                    </script>
-                    """
-                    components.html(js_print, height=0)
-                
-                st.success("✅ Venta Guardada")
-                st.session_state.pedido_temporal = []
-                time.sleep(1.5) 
-                st.rerun()
+                    components.html(f"<script>window.print();</script>{html_tickets}", height=0)
+                    st.success("✅ Venta registrada e impresión enviada.")
+                    time.sleep(2) 
+                else:
+                    st.success("✅ Venta registrada correctamente.")
 
+                st.session_state.pedido_temporal = []
+                st.rerun()
             except Exception as e:
-                st.error(f"Error: {e}")
+                st.error(f"Error al guardar: {e}")
+            
