@@ -120,8 +120,8 @@ with col_m:
             
             if st.session_state.modo_editor:
                 with grid[len(items) % 5]:
-                    nombre_btn = "➕\n\nNuevo\n" + str(titulo)
-                    if st.button(nombre_btn, key="btn_add_" + cat, use_container_width=True):
+                    label = "➕\n\nNuevo\n" + str(titulo)
+                    if st.button(label, key="add_" + cat, use_container_width=True):
                         modal_nuevo(cat)
 
     with st.expander("🍔 COMIDA", expanded=True):
@@ -168,23 +168,23 @@ with col_p:
                     })
                     
                     if es_comida:
-                        # DISEÑO: CATEGORÍA ARRIBA, PRODUCTO ABAJO
+                        # DISEÑO: TIPO ARRIBA (achicado) y PRODUCTO ABAJO
                         html_tickets += f"""
-                        <div style="page-break-after: always; text-align: center; width: 100%; font-family: sans-serif;">
-                            <p style="font-size: 14px; margin: 0; text-transform: uppercase;">{item['categoria']}</p>
-                            <h1 style="font-size: 28px; margin: 2px 0; font-weight: bold; text-transform: uppercase;">{item['producto']}</h1>
+                        <div style="page-break-after: always; text-align: center; width: 100%; font-family: sans-serif; padding: 0; margin: 0;">
+                            <p style="font-size: 10px; margin: 0; text-transform: uppercase; color: #333;">{item['categoria']}</p>
+                            <h1 style="font-size: 26px; margin: 2px 0; font-weight: bold; text-transform: uppercase;">{item['producto']}</h1>
                         </div>
                         """
 
                 # 1. Guardar en SQL
                 supabase.table("ventas").insert(ventas_to_insert).execute()
                 
-                # 2. Imprimir (Margen arriba para Google, margen abajo cero para ahorrar)
+                # 2. Imprimir (Margen arriba generoso para Google, margen abajo cero)
                 if html_tickets:
                     estilo = """
                     <style>
                         @page { 
-                            margin-top: 0.8cm; 
+                            margin-top: 1.2cm; 
                             margin-bottom: 0cm; 
                             margin-left: 0.1cm; 
                             margin-right: 0.1cm; 
