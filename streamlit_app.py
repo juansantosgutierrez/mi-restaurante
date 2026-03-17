@@ -2,6 +2,7 @@ import streamlit as st
 from supabase import create_client, Client
 import pandas as pd
 from datetime import datetime
+import streamlit.components.v1 as components
 
 # 🎨 Configuración de pantalla
 st.set_page_config(page_title="Restaurante Santos", layout="wide")
@@ -33,10 +34,8 @@ if 'pedido_temporal' not in st.session_state:
 if 'modo_editor' not in st.session_state:
     st.session_state.modo_editor = False
 
-# 🚀 ACELERADO: Bajamos el ttl a 2 para que refresque casi al instante
 @st.cache_data(ttl=2)
 def leer_menu_rapido():
-    """Lee el menú directamente desde la tabla SQL 'menu_dia'"""
     try: 
         response = supabase.table("menu_dia").select("*").execute()
         df = pd.DataFrame(response.data)
@@ -51,7 +50,6 @@ def modal_nuevo(cat):
     p = st.number_input("Precio ($)", min_value=0, step=100)
     if st.button("Guardar"):
         if n and p > 0:
-            # Insertar en SQL (minúsculas)
             supabase.table("menu_dia").insert({
                 "categoria": cat, 
                 "producto": n, 
@@ -92,7 +90,6 @@ def modal_gastos():
     d = st.text_input("Descripción")
     o = st.selectbox("Saco De:", ["Comida", "Bebestible", "Tienda", "Recarga", "Chela", "Otros", "Caja General"])
     if st.button("Guardar Gasto"):
-        # 🛡️ CORREGIDO: Aseguramos tabla 'gastos' en minúscula
         supabase.table("gastos").insert({
             "monto": int(m), 
             "descripcion": d, 
@@ -183,22 +180,52 @@ with col_p:
     if st.button("✅ FINALIZAR VENTA", type="primary", use_container_width=True):
         if st.session_state.pedido_temporal:
             try:
-                # Preparar datos
+                # 🕒 Obtener fecha y hora para el ticket
+                ahora = datetime.now()
+                fecha_hora = ahora.strftime("%d/%m/%Y %H:%M")
+                
                 ventas_to_insert = []
+                html_ticket = "" # Aquí guardamos el texto para la impresora
+
                 for item in st.session_state.pedido_temporal:
+                    # Revisar si es comida para el ticket
+                    es_comida = item["categoria"] in ["Desayuno", "Almuerzo", "Cena"]
+                    
                     ventas_to_insert.append({
                         "producto": item["producto"],
                         "monto": int(item["monto"]),
                         "categoria": item["categoria"],
                         "tipo": "PAGADO",
-                        "estado_impresion": "PENDIENTE" if item["categoria"] in ["Desayuno", "Almuerzo", "Cena"] else "N/A"
+                        "estado_impresion": "PENDIENTE" if es_comida else "N/A"
                     })
+
+                    # 📝 Si es comida, agregamos al diseño del ticket
+                    if es_comida:
+                        html_ticket += f"""
+                        <div style="text-align: center; font-family: sans-serif; border-bottom: 1px dashed black; padding: 10px;">
+                            <p style="font-size: 14px; margin: 0;">{item['categoria'].upper()}</p>
+                            <h1 style="font-size: 30px; margin: 5px 0;">{item['producto']}</h1>
+                            <p style="font-size: 12px; margin: 0;">{fecha_hora}</p>
+                        </div>
+                        """
                 
-                # 🛡️ CORREGIDO: Tabla 'ventas' en minúscula
+                # ⚡ Guardar en Supabase
                 supabase.table("ventas").insert(ventas_to_insert).execute()
                 
-                st.success("✅ Venta registrada correctamente.")
+                # 🖨️ DISPARAR IMPRESIÓN si hay comida
+                if html_ticket:
+                    js_code = f"""
+                    <script>
+                    var win = window.open('', '', 'height=500,width=500');
+                    win.document.write('<html><body style="margin:0;">{html_ticket}</body></html>');
+                    win.document.close();
+                    setTimeout(function(){{ win.print(); win.close(); }}, 200);
+                    </script>
+                    """
+                    components.html(js_code, height=0)
+
+                st.success("✅ Venta registrada e impresión enviada.")
                 st.session_state.pedido_temporal = []
                 st.rerun()
             except Exception as e:
-                st.error(f"Error al guardar en SQL: {e}")
+                st.error(f"Error: {e}")
