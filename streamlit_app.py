@@ -18,12 +18,18 @@ supabase: Client = create_client(URL_SUPABASE, KEY_SUPABASE)
 # CSS para que el Pedido FLOTE
 st.markdown("""
     <style>
-    [data-testid="stSidebarUserContent"] { padding-top: 1rem; }
-    .stColumn > div { position: sticky; top: 50px; height: auto; }
+    [data-testid="stSidebarUserContent"] {
+        padding-top: 1rem;
+    }
+    .stColumn > div {
+        position: sticky;
+        top: 50px;
+        height: auto;
+    }
     </style>
 """, unsafe_allow_html=True)
 
-# --- MEMORIA ---
+# --- MEMORIA Y CACHÉ ---
 if 'pedido_temporal' not in st.session_state:
     st.session_state.pedido_temporal = []
 if 'modo_editor' not in st.session_state:
@@ -139,9 +145,9 @@ with col_p:
     
     for i, item in enumerate(st.session_state.pedido_temporal):
         p_i = f"${int(item['monto']):,}".replace(",", ".")
-        ctx, cbt = st.columns([4, 1])
-        ctx.write(f"• {item['producto']} ({p_i})")
-        if cbt.button("🗑️", key=f"del_ped_{i}"):
+        col_txt, col_del = st.columns([4, 1])
+        col_txt.write(f"• {item['producto']} ({p_i})")
+        if col_del.button("🗑️", key=f"del_ped_{i}"):
             st.session_state.pedido_temporal.pop(i)
             st.rerun()
             
@@ -151,9 +157,10 @@ with col_p:
     if st.button("✅ FINALIZAR VENTA", type="primary", use_container_width=True):
         if st.session_state.pedido_temporal:
             try:
+                # 1. Preparar datos
                 ventas_to_insert = []
-                html_tickets = "" 
-
+                html_tickets = ""
+                
                 for item in st.session_state.pedido_temporal:
                     es_comida = item["categoria"] in ["Desayuno", "Almuerzo", "Cena"]
                     ventas_to_insert.append({
@@ -164,36 +171,32 @@ with col_p:
                         "estado_impresion": "PENDIENTE" if es_comida else "N/A"
                     })
                     
-                    # Creamos una ficha por cada plato de comida
+                    # Diseño de la FICHA (Restaurante Santos arriba izq, Producto Centro)
                     if es_comida:
                         html_tickets += f"""
-                        <div style="page-break-after: always; width: 100%; font-family: sans-serif; padding: 10px; border-bottom: 1px dashed #000;">
+                        <div style="page-break-after: always; font-family: sans-serif; width: 100%; padding: 0; margin: 0;">
                             <div style="font-size: 10px; text-align: left;">Restaurante Santos</div>
                             <div style="text-align: center; margin-top: 5px;">
-                                <h1 style="font-size: 28px; margin: 0; font-weight: bold;">{item['producto']}</h1>
+                                <h1 style="font-size: 26px; margin: 0; font-weight: bold;">{item['producto']}</h1>
                                 <p style="font-size: 12px; margin: 0;">({item['categoria'].upper()})</p>
                             </div>
                         </div>
                         """
-                
-                # 1. Guardar en Supabase
+
+                # 2. Guardar en SQL
                 supabase.table("ventas").insert(ventas_to_insert).execute()
                 
-                # 2. Imprimir con el método que sí funcionó (Pop-up rápido)
+                # 3. Disparar impresión (con estilo para NO gastar papel)
                 if html_tickets:
-                    js_print = f"""
-                    <script>
-                    var win = window.open('', '_blank', 'width=300,height=400');
-                    win.document.write('<html><head><style>@page {{ margin: 0; }}</style></head><body style="margin:0;" onload="window.print();window.close();">{html_tickets}</body></html>');
-                    win.document.close();
-                    </script>
-                    """
-                    components.html(js_print, height=0)
-                
-                st.success("✅ Venta Guardada")
-                st.session_state.pedido_temporal = []
-                time.sleep(1.5) # Pausa para que el papel salga antes de limpiar
-                st.rerun()
+                    # Estilo CSS para ocultar encabezados del navegador y ajustar a la térmica
+                    estilo = "<style>@page { margin: 0; size: auto; } body { margin: 0.2cm; }</style>"
+                    components.html(f"{estilo}<script>window.print();</script>{html_tickets}", height=0)
+                    st.success("✅ Venta registrada e impresión enviada.")
+                    time.sleep(2) 
+                else:
+                    st.success("✅ Venta registrada correctamente.")
 
+                st.session_state.pedido_temporal = []
+                st.rerun()
             except Exception as e:
-                st.error(f"Error: {e}")
+                st.error(f"Error al guardar en SQL: {e}")
