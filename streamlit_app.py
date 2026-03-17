@@ -3,7 +3,7 @@ from supabase import create_client, Client
 import pandas as pd
 from datetime import datetime
 import streamlit.components.v1 as components
-import time  # <--- Nuevo: para dar tiempo a la impresora
+import time
 
 # 🎨 Configuración de pantalla
 st.set_page_config(page_title="Restaurante Santos", layout="wide")
@@ -18,14 +18,8 @@ supabase: Client = create_client(URL_SUPABASE, KEY_SUPABASE)
 # CSS para que el Pedido FLOTE
 st.markdown("""
     <style>
-    [data-testid="stSidebarUserContent"] {
-        padding-top: 1rem;
-    }
-    .stColumn > div {
-        position: sticky;
-        top: 50px;
-        height: auto;
-    }
+    [data-testid="stSidebarUserContent"] { padding-top: 1rem; }
+    .stColumn > div { position: sticky; top: 50px; height: auto; }
     </style>
 """, unsafe_allow_html=True)
 
@@ -157,7 +151,6 @@ with col_p:
     if st.button("✅ FINALIZAR VENTA", type="primary", use_container_width=True):
         if st.session_state.pedido_temporal:
             try:
-                # 1. Preparar datos y ticket
                 ahora = datetime.now()
                 f_h = ahora.strftime("%d/%m/%Y %H:%M")
                 ventas_to_insert = []
@@ -175,33 +168,37 @@ with col_p:
 
                     if es_comida:
                         html_ticket += f"""
-                        <div style="text-align: center; font-family: Arial; border-bottom: 1px dashed black; padding: 10px; width: 100%;">
-                            <p style="font-size: 14px; margin: 0;">{item['categoria'].upper()}</p>
-                            <h1 style="font-size: 35px; margin: 5px 0; font-weight: bold;">{item['producto']}</h1>
-                            <p style="font-size: 12px; margin: 0;">{f_h}</p>
+                        <div style="text-align: center; font-family: sans-serif; border-bottom: 1px dashed black; padding: 10px; width: 200px;">
+                            <p style="font-size: 12px; margin: 0;">{item['categoria'].upper()}</p>
+                            <h1 style="font-size: 28px; margin: 5px 0;">{item['producto']}</h1>
+                            <p style="font-size: 10px; margin: 0;">{f_h}</p>
                         </div>
                         """
                 
-                # 2. Guardar en Supabase primero
+                # Guardar en Supabase
                 supabase.table("ventas").insert(ventas_to_insert).execute()
                 
-                # 3. Disparar Impresión
+                # IMPRESIÓN POR IFRAME (Más difícil de bloquear)
                 if html_ticket:
                     js_print = f"""
                     <script>
-                    var win = window.open('', '_blank', 'width=300,height=400');
-                    win.document.write('<html><body style="margin:0;" onload="window.print();window.close();">{html_ticket}</body></html>');
-                    win.document.close();
+                    var frame = document.createElement('iframe');
+                    frame.style.display = 'none';
+                    document.body.appendChild(frame);
+                    var d = frame.contentWindow.document;
+                    d.write('<html><body style="margin:0;">{html_ticket}</body></html>');
+                    d.close();
+                    setTimeout(function(){{
+                        frame.contentWindow.focus();
+                        frame.contentWindow.print();
+                    }}, 500);
                     </script>
                     """
                     components.html(js_print, height=0)
                 
-                # 4. Feedback y Limpieza con PAUSA
-                st.success("✅ Venta Guardada con éxito.")
+                st.success("✅ Venta Guardada")
                 st.session_state.pedido_temporal = []
-                
-                # Damos 2 segundos para que el JS actúe antes de recargar la página
-                time.sleep(2) 
+                time.sleep(2)
                 st.rerun()
 
             except Exception as e:
