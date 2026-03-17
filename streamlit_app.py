@@ -120,9 +120,9 @@ with col_m:
             
             if st.session_state.modo_editor:
                 with grid[len(items) % 5]:
-                    # Corregido para evitar el SyntaxError
-                    nombre_btn = "➕\n\nNuevo\n" + str(titulo)
-                    if st.button(nombre_btn, key="btn_new_" + cat, use_container_width=True):
+                    # ✅ CORREGIDO: Sin f-string para evitar el SyntaxError
+                    btn_label = "➕\n\nNuevo\n" + str(titulo)
+                    if st.button(btn_label, key="add_" + cat, use_container_width=True):
                         modal_nuevo(cat)
 
     with st.expander("🍔 COMIDA", expanded=True):
@@ -169,20 +169,22 @@ with col_p:
                     })
                     
                     if es_comida:
-                        # PRODUCTO ARRIBA (Grande) y TIPO ABAJO (Chico)
+                        # DISEÑO COMPACTO: TIPO ARRIBA, PRODUCTO ABAJO
                         html_tickets += f"""
-                        <div style="page-break-after: always; font-family: sans-serif; text-align: center; width: 100%; padding: 5px 0;">
+                        <div style="text-align: center; font-family: sans-serif; width: 100%; border-bottom: 1px solid transparent; padding: 2px 0;">
+                            <p style="font-size: 14px; margin: 0; text-transform: uppercase;">{item['categoria']}</p>
                             <h1 style="font-size: 28px; margin: 0; font-weight: bold; text-transform: uppercase;">{item['producto']}</h1>
-                            <p style="font-size: 14px; margin: 2px 0; text-transform: uppercase;">{item['categoria']}</p>
                         </div>
                         """
 
                 # 1. Guardar en SQL
                 supabase.table("ventas").insert(ventas_to_insert).execute()
                 
-                # 2. Imprimir (Sin forzar márgenes 0 para que Google ponga la fecha/nombre)
+                # 2. Imprimir (Márgenes mínimos para que Google ponga lo suyo y NO gaste papel)
                 if html_tickets:
-                    components.html(f"<script>window.print();</script>{html_tickets}", height=0)
+                    # Quitamos el 'page-break-after' y usamos márgenes mínimos
+                    estilo = "<style>@page { margin: 0.1cm; size: auto; } body { margin: 0; padding: 0; }</style>"
+                    components.html(f"{estilo}<script>window.print();</script>{html_tickets}", height=0)
                     st.success("✅ Venta registrada e impresión enviada.")
                     time.sleep(2) 
                 else:
@@ -192,4 +194,3 @@ with col_p:
                 st.rerun()
             except Exception as e:
                 st.error(f"Error al guardar: {e}")
-            
