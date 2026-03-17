@@ -3,7 +3,6 @@ from supabase import create_client, Client
 import pandas as pd
 from datetime import datetime
 import streamlit.components.v1 as components
-import time
 
 # 🎨 Configuración de pantalla
 st.set_page_config(page_title="Restaurante Santos", layout="wide")
@@ -23,11 +22,13 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# --- MEMORIA Y CACHÉ ---
+# --- MEMORIA Y ESTADOS ---
 if 'pedido_temporal' not in st.session_state:
     st.session_state.pedido_temporal = []
 if 'modo_editor' not in st.session_state:
     st.session_state.modo_editor = False
+if 'venta_finalizada' not in st.session_state:
+    st.session_state.venta_finalizada = False
 
 @st.cache_data(ttl=2)
 def leer_menu_rapido():
@@ -38,7 +39,7 @@ def leer_menu_rapido():
     except: 
         return pd.DataFrame(columns=["id", "categoria", "producto", "monto"])
 
-# --- VENTANAS FLOTANTES (MODALES) ---
+# --- MODALES ---
 @st.dialog("➕ Nuevo Producto")
 def modal_nuevo(cat):
     n = st.text_input(f"Nombre del {cat}")
@@ -116,6 +117,7 @@ with col_m:
                     p_f = f"${int(row['monto']):,}".replace(",", ".")
                     if st.button(f"{row['producto']}\n\n{p_f}", key=f"b_{row['id']}", use_container_width=True):
                         st.session_state.pedido_temporal.append({"categoria": row['categoria'], "producto": row['producto'], "monto": row['monto']})
+                        st.session_state.venta_finalizada = False
                         st.rerun()
             if st.session_state.modo_editor:
                 with grid[len(items) % 5]:
@@ -134,7 +136,7 @@ with col_m:
     mostrar_seccion("📦 OTROS", "Otros", especial="Otros")
 
 with col_p:
-    st.subheader("📝 Pedido Actual")
+    st.subheader("📝 Pedido")
     total = sum(int(i["monto"]) for i in st.session_state.pedido_temporal)
     
     for i, item in enumerate(st.session_state.pedido_temporal):
@@ -148,58 +150,57 @@ with col_p:
     st.divider()
     st.markdown(f"## TOTAL: ${total:,}".replace(",", "."))
     
-    if st.button("✅ FINALIZAR VENTA", type="primary", use_container_width=True):
-        if st.session_state.pedido_temporal:
-            try:
-                ahora = datetime.now()
-                f_h = ahora.strftime("%d/%m/%Y %H:%M")
-                ventas_to_insert = []
-                html_ticket = "" 
+    if st.session_state.venta_finalizada:
+        st.success("✅ Venta Guardada")
+        if st.button("🆕 NUEVA VENTA", type="secondary", use_container_width=True):
+            st.session_state.pedido_temporal = []
+            st.session_state.venta_finalizada = False
+            st.rerun()
+    else:
+        if st.button("✅ FINALIZAR VENTA", type="primary", use_container_width=True):
+            if st.session_state.pedido_temporal:
+                try:
+                    ahora = datetime.now()
+                    f_h = ahora.strftime("%H:%M")
+                    ventas_list = []
+                    ticket_html = "" 
 
-                for item in st.session_state.pedido_temporal:
-                    es_comida = item["categoria"] in ["Desayuno", "Almuerzo", "Cena"]
-                    ventas_to_insert.append({
-                        "producto": item["producto"],
-                        "monto": int(item["monto"]),
-                        "categoria": item["categoria"],
-                        "tipo": "PAGADO",
-                        "estado_impresion": "PENDIENTE" if es_comida else "N/A"
-                    })
-
-                    if es_comida:
-                        html_ticket += f"""
-                        <div style="text-align: center; font-family: sans-serif; border-bottom: 1px dashed black; padding: 10px; width: 200px;">
-                            <p style="font-size: 12px; margin: 0;">{item['categoria'].upper()}</p>
-                            <h1 style="font-size: 28px; margin: 5px 0;">{item['producto']}</h1>
-                            <p style="font-size: 10px; margin: 0;">{f_h}</p>
-                        </div>
+                    for item in st.session_state.pedido_temporal:
+                        es_comida = item["categoria"] in ["Desayuno", "Almuerzo", "Cena"]
+                        ventas_list.append({
+                            "producto": item["producto"],
+                            "monto": int(item["monto"]),
+                            "categoria": item["categoria"],
+                            "tipo": "PAGADO",
+                            "estado_impresion": "PENDIENTE" if es_comida else "N/A"
+                        })
+                        if es_comida:
+                            ticket_html += f"""
+                            <div style="text-align: center; font-family: sans-serif; padding: 5px;">
+                                <h1 style="font-size: 35px; margin: 5px 0;">{item['producto']}</h1>
+                                <p style="font-size: 15px; margin: 0;">{f_h}</p>
+                            </div><hr>
+                            """
+                    
+                    # 1. Guardar en Supabase
+                    supabase.table("ventas").insert(ventas_list).execute()
+                    
+                    # 2. Imprimir con IFRAME (Más directo)
+                    if ticket_html:
+                        js = f"""
+                        <script>
+                        var frame = document.createElement('iframe');
+                        frame.style.display = 'none';
+                        document.body.appendChild(frame);
+                        var d = frame.contentWindow.document;
+                        d.write('<html><body onload="window.print();">{ticket_html}</body></html>');
+                        d.close();
+                        </script>
                         """
-                
-                # Guardar en Supabase
-                supabase.table("ventas").insert(ventas_to_insert).execute()
-                
-                # IMPRESIÓN POR IFRAME (Más difícil de bloquear)
-                if html_ticket:
-                    js_print = f"""
-                    <script>
-                    var frame = document.createElement('iframe');
-                    frame.style.display = 'none';
-                    document.body.appendChild(frame);
-                    var d = frame.contentWindow.document;
-                    d.write('<html><body style="margin:0;">{html_ticket}</body></html>');
-                    d.close();
-                    setTimeout(function(){{
-                        frame.contentWindow.focus();
-                        frame.contentWindow.print();
-                    }}, 500);
-                    </script>
-                    """
-                    components.html(js_print, height=0)
-                
-                st.success("✅ Venta Guardada")
-                st.session_state.pedido_temporal = []
-                time.sleep(2)
-                st.rerun()
+                        components.html(js, height=0)
+                    
+                    st.session_state.venta_finalizada = True
+                    st.rerun()
 
-            except Exception as e:
-                st.error(f"Error: {e}")
+                except Exception as e:
+                    st.error(f"Error: {e}")
