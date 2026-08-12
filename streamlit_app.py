@@ -6,6 +6,7 @@ from zoneinfo import ZoneInfo
 import streamlit.components.v1 as components
 import time
 import re
+import unicodedata
 
 # --- 🕒 FUNCIONES DE HORA CHILENA INTELIGENTE ---
 def obtener_hora_chile():
@@ -19,11 +20,14 @@ def formatear_hora_supabase(fecha_utc_str):
     except:
         return fecha_utc_str
 
-# --- 🧹 LIMPIEZA EXTREMA (MATA LAS LETRAS CHINAS) ---
+# --- 🧹 LIMPIEZA ANTI-CHINO PARA LA IMPRESORA ---
 def limpiar_texto(texto):
     if not texto: return ""
-    # Esta línea DESTRUYE cualquier código oculto del escáner. Solo permite letras y números normales.
-    texto_limpio = re.sub(r'[^a-zA-Z0-9\sñÑáéíóúÁÉÍÓÚ$().,-]', '', str(texto))
+    texto_str = str(texto)
+    # 1. Convierte letras raras, ñ y tildes en letras normales y limpias (á -> a, ñ -> n)
+    texto_sin_tildes = ''.join(c for c in unicodedata.normalize('NFD', texto_str) if unicodedata.category(c) != 'Mn')
+    # 2. Destruye cualquier basura invisible dejando solo lo básico
+    texto_limpio = re.sub(r'[^a-zA-Z0-9\s$().,-]', '', texto_sin_tildes)
     return texto_limpio.strip()
 
 # 🎨 Configuración de pantalla
@@ -167,7 +171,6 @@ def procesar_scanner():
             producto_encontrado = menu_actual[menu_actual['codigo_str'] == codigo_leido]
             if not producto_encontrado.empty:
                 row = producto_encontrado.iloc[0]
-                # Limpiamos todo antes de que entre al carrito
                 st.session_state.pedido_temporal.append({
                     "categoria": limpiar_texto(row['categoria']), 
                     "producto": limpiar_texto(row['producto']), 
@@ -286,7 +289,6 @@ with col_p:
             try:
                 ventas_to_insert = []
                 
-                # 1. Guardar en BD
                 for item in st.session_state.pedido_temporal:
                     cat_limpia = limpiar_texto(item.get("categoria", ""))
                     es_comida = cat_limpia in ["Desayuno", "Almuerzo", "Cena"]
@@ -301,7 +303,6 @@ with col_p:
 
                 supabase.table("ventas").insert(ventas_to_insert).execute()
                 
-                # 2. Agrupar para ticket de cocina
                 conteo_comidas = {}
                 for item in st.session_state.pedido_temporal:
                     cat_limpia = limpiar_texto(item.get("categoria", ""))
@@ -327,7 +328,6 @@ with col_p:
                     </div>
                     """
                 
-                # Si solo compró bebidas, se hace un ticket chiquitito para que patee la caja registradora
                 if not html_tickets:
                     html_tickets = f"""
                     <div style="text-align: center; width: 100%; font-family: sans-serif; padding: 0; margin: 0;">
