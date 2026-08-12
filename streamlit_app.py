@@ -21,7 +21,6 @@ st.markdown("""
     [data-testid="stSidebarUserContent"] { padding-top: 1rem; }
     .stColumn > div { position: sticky; top: 50px; height: auto; }
     
-    /* Oculta la barra del escáner pero la mantiene activa */
     div[data-testid="stTextInput"]:has(input[placeholder="oculto_scanner"]) {
         position: absolute !important;
         left: -9999px !important;
@@ -41,6 +40,8 @@ if 'modo_editor' not in st.session_state:
     st.session_state.modo_editor = False
 if 'msj_scanner' not in st.session_state:
     st.session_state.msj_scanner = ""
+if 'vista_debo' not in st.session_state:
+    st.session_state.vista_debo = "lista"
 
 @st.cache_data(ttl=2)
 def leer_menu_rapido():
@@ -94,10 +95,8 @@ def modal_gastos():
             st.success("Gasto guardado correctamente")
             st.rerun()
 
-# --- MODAL DEBO (ANCHO Y TODO EN UNO) ---
 @st.dialog("🤝 Registro DEBO / Vueltos Pendientes", width="large")
 def modal_debo():
-    # 1. EXPANSOR PARA AGREGAR NUEVO (No cambia de pantalla)
     with st.expander("➕ Agregar Nuevo Registro", expanded=False):
         nom = st.text_input("Nombre de la persona")
         mon = st.number_input("Monto ($)", min_value=0, step=100, value=None, placeholder="Ej: 2000 (Opcional)", key="debo_monto")
@@ -108,16 +107,14 @@ def modal_debo():
                 if mon is not None and mon > 0:
                     datos["monto"] = int(mon)
                 supabase.table("debo").insert(datos).execute()
-                st.rerun() # Recarga la ventanita para mostrar el nuevo
+                st.rerun() 
             else:
                 st.error("Ingresa al menos el nombre y la descripción.")
 
     st.divider()
     
-    # 2. LISTA DE REGISTROS DE LA FECHA
     st.caption("📅 Registros del día:")
     fecha_sel = st.date_input("Fecha", datetime.now(), label_visibility="collapsed")
-    
     fecha_ini = f"{fecha_sel}T00:00:00"
     fecha_fin = f"{fecha_sel}T23:59:59"
     
@@ -131,7 +128,6 @@ def modal_debo():
         st.info("ℹ️ No hay registros pendientes para esta fecha.")
     else:
         for item in registros:
-            # Columnas ajustadas para que la descripción tenga mucho espacio (c1=5, c2=2, c3=2)
             c1, c2, c3 = st.columns([5, 2, 2])
             with c1:
                 monto_str = f" (${int(item['monto']):,})".replace(",", ".") if item.get('monto') else ""
@@ -150,8 +146,6 @@ def modal_debo():
                     st.rerun()
             st.markdown("---")
 
-
-# --- FUNCIÓN DEL LECTOR DE CÓDIGOS INVISIBLE ---
 def procesar_scanner():
     codigo_leido = st.session_state.lector_codigo.strip()
     if codigo_leido:
@@ -159,7 +153,6 @@ def procesar_scanner():
         if "codigo" in menu_actual.columns:
             menu_actual['codigo_str'] = menu_actual['codigo'].fillna('').astype(str).str.strip()
             producto_encontrado = menu_actual[menu_actual['codigo_str'] == codigo_leido]
-            
             if not producto_encontrado.empty:
                 row = producto_encontrado.iloc[0]
                 st.session_state.pedido_temporal.append({
@@ -172,7 +165,6 @@ def procesar_scanner():
                 st.session_state.msj_scanner = "❌ Producto no encontrado."
         else:
             st.session_state.msj_scanner = "⚠️ Falta la columna 'codigo'."
-            
     st.session_state.lector_codigo = ""
 
 # --- CARGAR DATOS ---
@@ -236,7 +228,6 @@ with col_m:
 
 # COLUMNA DERECHA: CARRITO Y ESCÁNER INVISIBLE
 with col_p:
-    # 🔫 ESCÁNER 100% INVISIBLE
     st.text_input("Lector Oculto", key="lector_codigo", on_change=procesar_scanner, placeholder="oculto_scanner", label_visibility="collapsed")
     
     components.html("""
@@ -244,17 +235,11 @@ with col_p:
         function enfocarLector() {
             var parent = window.parent.document;
             var activo = parent.activeElement;
-            
             if (activo && (activo.tagName === 'INPUT' || activo.tagName === 'TEXTAREA')) {
-                if (activo.placeholder !== "oculto_scanner") {
-                    return; 
-                }
+                if (activo.placeholder !== "oculto_scanner") { return; }
             }
-            
             var lector = parent.querySelector('input[placeholder="oculto_scanner"]');
-            if (lector) {
-                lector.focus();
-            }
+            if (lector) { lector.focus(); }
         }
         setInterval(enfocarLector, 500);
         </script>
@@ -285,6 +270,9 @@ with col_p:
                 ventas_to_insert = []
                 html_tickets = ""
                 
+                # Obtenemos la fecha exacta para el ticket
+                fecha_ticket = datetime.now().strftime("%d/%m/%y, %H:%M")
+                
                 for item in st.session_state.pedido_temporal:
                     es_comida = item["categoria"] in ["Desayuno", "Almuerzo", "Cena"]
                     ventas_to_insert.append({
@@ -296,24 +284,26 @@ with col_p:
                     })
                     
                     if es_comida:
+                        # DISEÑO EXACTO AL PDF:
                         html_tickets += f"""
-                        <div style="page-break-after: always; text-align: center; width: 100%; font-family: sans-serif; padding: 0; margin: 0;">
-                            <h1 style="font-size: 26px; margin: 0; font-weight: bold; text-transform: uppercase;">{item['producto']}</h1>
-                            <p style="font-size: 11px; margin: 2px 0; text-transform: uppercase; color: #333;">({item['categoria']})</p>
+                        <div style="page-break-after: always; text-align: left; width: 100%; font-family: sans-serif; padding: 0; margin: 0;">
+                            <p style="font-size: 12px; margin: 0; color: #000;">{fecha_ticket}</p>
+                            <p style="font-size: 12px; margin: 0; margin-bottom: 15px; color: #000;">Restaurante Santos</p>
+                            
+                            <div style="text-align: center;">
+                                <h1 style="font-size: 28px; margin: 0; font-weight: bold; text-transform: uppercase; line-height: 1.1;">{item['producto']}</h1>
+                                <p style="font-size: 14px; margin: 5px 0 20px 0; text-transform: uppercase; color: #000;">({item['categoria']})</p>
+                            </div>
                         </div>
                         """
 
                 supabase.table("ventas").insert(ventas_to_insert).execute()
                 
+                # Si hay ticket de comida, imprimimos y de paso se abre la caja fuerte
                 if html_tickets:
                     estilo = """
                     <style>
-                        @page { 
-                            margin-top: 1.2cm; 
-                            margin-bottom: 0cm; 
-                            margin-left: 0.1cm; 
-                            margin-right: 0.1cm; 
-                        } 
+                        @page { margin-top: 0.5cm; margin-bottom: 0cm; margin-left: 0.1cm; margin-right: 0.1cm; } 
                         body { margin: 0; padding: 0; }
                     </style>
                     """
@@ -321,7 +311,8 @@ with col_p:
                     st.success("✅ Venta registrada e impresión enviada.")
                     time.sleep(2) 
                 else:
-                    st.success("✅ Venta registrada correctamente.")
+                    # Si es solo bebida, se guarda, NO imprime NADA y usas la llave de la caja :)
+                    st.success("✅ Venta registrada correctamente (Solo bebidas).")
 
                 st.session_state.pedido_temporal = []
                 st.rerun()
