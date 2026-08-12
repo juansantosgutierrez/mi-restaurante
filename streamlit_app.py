@@ -15,13 +15,13 @@ URL_SUPABASE = "https://luklxueplpxdktreuloa.supabase.co"
 KEY_SUPABASE = "sb_publishable_KxAtLO6z0_4SUtbpQDWekQ_mKXZZebX"
 supabase: Client = create_client(URL_SUPABASE, KEY_SUPABASE)
 
-# CSS: Hace que el pedido flote y hace INVISIBLE la barra del escáner
+# CSS: Hace que el pedido flote y oculta el lector
 st.markdown("""
     <style>
     [data-testid="stSidebarUserContent"] { padding-top: 1rem; }
     .stColumn > div { position: sticky; top: 50px; height: auto; }
     
-    /* 🪄 MAGIA: Oculta la barra del escáner pero la mantiene activa en el fondo */
+    /* Oculta la barra del escáner pero la mantiene activa */
     div[data-testid="stTextInput"]:has(input[placeholder="oculto_scanner"]) {
         position: absolute !important;
         left: -9999px !important;
@@ -87,18 +87,23 @@ def modal_otros():
 
 @st.dialog("💸 Gasto")
 def modal_gastos():
-    # Muestra la hora exacta optimizada sin ralentizar la app
-    hora_actual = datetime.now().strftime("%d/%m/%Y a las %H:%M:%S")
-    st.info(f"🕒 **Hora de registro:** {hora_actual}")
+    # Obtener hora exacta actual
+    ahora = datetime.now()
+    hora_pantalla = ahora.strftime("%H:%M:%S (%d/%m/%Y)")
+    st.info(f"🕒 **Hora actual:** {hora_pantalla}")
     
     m = st.number_input("Monto ($)", min_value=0, step=500, value=None, placeholder="Ej: 10000")
     d = st.text_input("Descripción")
     
     if st.button("Guardar Gasto"):
         if m is not None and m > 0:
-            # Eliminamos el "Saco de" para hacerlo más rápido
-            supabase.table("gastos").insert({"monto": int(m), "descripcion": d}).execute()
-            st.success("Gasto guardado")
+            # Guarda directo en Supabase (monto y descripción). 
+            # Supabase asignará la hora exacta en la columna 'created_at' automáticamente.
+            supabase.table("gastos").insert({
+                "monto": int(m), 
+                "descripcion": d
+            }).execute()
+            st.success("Gasto guardado correctamente")
             st.rerun()
 
 # --- FUNCIÓN DEL LECTOR DE CÓDIGOS INVISIBLE ---
