@@ -15,7 +15,7 @@ URL_SUPABASE = "https://luklxueplpxdktreuloa.supabase.co"
 KEY_SUPABASE = "sb_publishable_KxAtLO6z0_4SUtbpQDWekQ_mKXZZebX"
 supabase: Client = create_client(URL_SUPABASE, KEY_SUPABASE)
 
-# CSS para que el Pedido FLOTE
+# CSS para que el Pedido FLOTE y quitar bordes molestos
 st.markdown("""
     <style>
     [data-testid="stSidebarUserContent"] { padding-top: 1rem; }
@@ -40,17 +40,18 @@ def leer_menu_rapido():
     except: 
         return pd.DataFrame(columns=["id", "categoria", "producto", "monto", "codigo"])
 
-# --- MODALES ---
+# --- MODALES (CON EL PROBLEMA DEL 0 CORREGIDO) ---
 @st.dialog("➕ Nuevo Producto")
 def modal_nuevo(cat):
     n = st.text_input(f"Nombre del {cat}")
-    p = st.number_input("Precio ($)", min_value=0, step=100)
-    c = st.text_input("Código de Barras (Opcional - Pistolea aquí)") # ¡Ahora puedes agregar el código directo!
+    # ¡AQUÍ ESTÁ LA MAGIA! value=None hace que empiece en blanco sin el 0
+    p = st.number_input("Precio ($)", min_value=0, step=100, value=None, placeholder="Ej: 1500")
+    c = st.text_input("Código de Barras (Opcional - Pistolea aquí)")
     
     if st.button("Guardar"):
-        if n and p > 0:
+        if n and p is not None and p > 0:
             datos_nuevos = {"categoria": cat, "producto": n, "monto": int(p)}
-            if c:  # Si pasaste el lector, guarda el código también
+            if c:
                 datos_nuevos["codigo"] = c.strip()
                 
             supabase.table("menu_dia").insert(datos_nuevos).execute()
@@ -60,30 +61,31 @@ def modal_nuevo(cat):
 @st.dialog("📲 Realizar Recarga")
 def modal_recarga():
     op = st.selectbox("Operador", ["WOM", "ENTEL", "MOVISTAR", "CLARO"])
-    m = st.number_input("Monto ($)", min_value=0, step=500)
+    m = st.number_input("Monto ($)", min_value=0, step=500, value=None, placeholder="Ej: 2000")
     if st.button("Agregar al Pedido"):
-        if m > 0:
+        if m is not None and m > 0:
             st.session_state.pedido_temporal.append({"categoria": "Recarga", "producto": f"Recarga {op}", "monto": int(m)})
             st.rerun()
 
 @st.dialog("📦 Venta Especial")
 def modal_otros():
     desc = st.text_input("¿Qué se vendió?")
-    m = st.number_input("Monto ($)", min_value=0, step=100)
+    m = st.number_input("Monto ($)", min_value=0, step=100, value=None, placeholder="Ej: 5000")
     if st.button("Agregar al Pedido"):
-        if desc and m > 0:
+        if desc and m is not None and m > 0:
             st.session_state.pedido_temporal.append({"categoria": "Otros", "producto": desc, "monto": int(m)})
             st.rerun()
 
 @st.dialog("💸 Gasto")
 def modal_gastos():
-    m = st.number_input("Monto ($)", min_value=0, step=500)
+    m = st.number_input("Monto ($)", min_value=0, step=500, value=None, placeholder="Ej: 10000")
     d = st.text_input("Descripción")
     o = st.selectbox("Saco De:", ["Comida", "Bebestible", "Tienda", "Recarga", "Chela", "Otros", "Caja General"])
     if st.button("Guardar Gasto"):
-        supabase.table("gastos").insert({"monto": int(m), "descripcion": d, "origen": o}).execute()
-        st.success("Gasto guardado")
-        st.rerun()
+        if m is not None and m > 0:
+            supabase.table("gastos").insert({"monto": int(m), "descripcion": d, "origen": o}).execute()
+            st.success("Gasto guardado")
+            st.rerun()
 
 # --- CARGAR DATOS ---
 df_menu = leer_menu_rapido()
@@ -93,7 +95,6 @@ def procesar_scanner():
     codigo_leido = st.session_state.lector_codigo.strip()
     if codigo_leido:
         if "codigo" in df_menu.columns:
-            # Limpiamos los datos para que compare exacto
             df_menu['codigo_str'] = df_menu['codigo'].fillna('').astype(str).str.strip()
             producto_encontrado = df_menu[df_menu['codigo_str'] == codigo_leido]
             
@@ -106,11 +107,11 @@ def procesar_scanner():
                 })
                 st.session_state.msj_scanner = f"✅ {row['producto']} agregado."
             else:
-                st.session_state.msj_scanner = "❌ Producto no encontrado. Agrégalo al menú."
+                st.session_state.msj_scanner = "❌ Producto no encontrado."
         else:
             st.session_state.msj_scanner = "⚠️ Falta la columna 'codigo' en Supabase."
             
-    # ¡Clave! Limpia la caja automáticamente para el siguiente producto
+    # Limpia la caja automáticamente para pistolear de nuevo
     st.session_state.lector_codigo = ""
 
 # --- INTERFAZ ---
@@ -129,21 +130,8 @@ if c3.button(txt_btn, use_container_width=True):
 
 col_m, col_p = st.columns([3, 1])
 
+# COLUMNA IZQUIERDA: EL MENÚ COMO SIEMPRE
 with col_m:
-    # --- 🔫 CAJA DEL LECTOR DE BARRAS ---
-    st.text_input("🛒 Pistolea el código aquí:", key="lector_codigo", on_change=procesar_scanner)
-    
-    # Mostrar mensaje de éxito o error al pistolear
-    if st.session_state.msj_scanner:
-        if "✅" in st.session_state.msj_scanner:
-            st.success(st.session_state.msj_scanner)
-        else:
-            st.error(st.session_state.msj_scanner)
-        st.session_state.msj_scanner = "" # Borra el mensaje
-        
-    st.divider()
-    # ------------------------------------
-
     def mostrar_seccion(titulo, cat, especial=None):
         st.header(titulo)
         grid = st.columns(5)
@@ -185,7 +173,31 @@ with col_m:
     mostrar_seccion("🍺 CHELA", "Chela")
     mostrar_seccion("📦 OTROS", "Otros", especial="Otros")
 
+# COLUMNA DERECHA: CARRITO Y CAJA DE LECTOR
 with col_p:
+    # Cajita del escáner discreta y pequeña arriba del carrito
+    st.text_input("🛒 Pasar Lector:", key="lector_codigo", on_change=procesar_scanner, placeholder="Pistolea un código...")
+    
+    # Código en Javascript para que la cajita se seleccione SOLA siempre
+    components.html("""
+        <script>
+        setTimeout(function() {
+            var inputs = window.parent.document.querySelectorAll('input[type="text"]');
+            for (var i = 0; i < inputs.length; i++) {
+                if (inputs[i].placeholder === "Pistolea un código...") {
+                    inputs[i].focus();
+                    break;
+                }
+            }
+        }, 100);
+        </script>
+    """, height=0)
+    
+    if st.session_state.msj_scanner:
+        if "✅" in st.session_state.msj_scanner: st.success(st.session_state.msj_scanner)
+        else: st.error(st.session_state.msj_scanner)
+        st.session_state.msj_scanner = ""
+
     st.subheader("📝 Pedido Actual")
     total = sum(int(i["monto"]) for i in st.session_state.pedido_temporal)
     
@@ -217,7 +229,6 @@ with col_p:
                     })
                     
                     if es_comida:
-                        # DISEÑO: PRODUCTO ARRIBA, TIPO ABAJO EN PARÉNTESIS
                         html_tickets += f"""
                         <div style="page-break-after: always; text-align: center; width: 100%; font-family: sans-serif; padding: 0; margin: 0;">
                             <h1 style="font-size: 26px; margin: 0; font-weight: bold; text-transform: uppercase;">{item['producto']}</h1>
@@ -225,10 +236,8 @@ with col_p:
                         </div>
                         """
 
-                # 1. Guardar en SQL
                 supabase.table("ventas").insert(ventas_to_insert).execute()
                 
-                # 2. Imprimir (Margen arriba 1.2cm para Google, abajo cero para ahorrar)
                 if html_tickets:
                     estilo = """
                     <style>
