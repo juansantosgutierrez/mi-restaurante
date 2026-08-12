@@ -20,12 +20,11 @@ def formatear_hora_supabase(fecha_utc_str):
     except:
         return fecha_utc_str
 
-# --- 🛡️ FILTRO DICTATORIAL (AHORA PERMITE EL SÍMBOLO '+' PARA LOS DESAYUNOS) ---
+# --- 🛡️ FILTRO DICTATORIAL ---
 def filtro_estricto(texto):
     if not texto: return ""
     t = str(texto).upper()
     t = t.replace('Á','A').replace('É','E').replace('Í','I').replace('Ó','O').replace('Ú','U').replace('Ñ','N')
-    # Permite letras, números, espacios y el signo '+'
     t_limpio = re.sub(r'[^A-Z0-9\s+]', '', t)
     return t_limpio.strip()
 
@@ -35,10 +34,8 @@ def aplicar_bebida_desayuno(categoria, producto):
     prod = filtro_estricto(producto).upper()
     
     if cat == "DESAYUNO":
-        # Evitamos agregar bebida si el producto es un caldo o una bebida individual
         excluir = ["CALDO", "CAFE", "TE", "MATE"]
         if not any(x in prod for x in excluir):
-            # Leemos qué bebida está seleccionada en los botones rápidos
             bebida_seleccionada = st.session_state.get("bebida_desayuno", "Ninguna")
             if bebida_seleccionada != "Ninguna":
                 prod = f"{prod} + {filtro_estricto(bebida_seleccionada).upper()}"
@@ -170,7 +167,6 @@ def procesar_scanner():
             if not producto_encontrado.empty:
                 row = producto_encontrado.iloc[0]
                 
-                # Pasa por el filtro inteligente de bebida
                 prod_final = aplicar_bebida_desayuno(row['categoria'], row['producto'])
                 
                 st.session_state.pedido_temporal.append({
@@ -225,9 +221,7 @@ with col_m:
                             st.rerun()
                     p_f = f"${int(row['monto']):,}".replace(",", ".")
                     
-                    # Botón del producto
                     if st.button(f"{row['producto']}\n\n{p_f}", key=f"b_{row['id']}", use_container_width=True):
-                        # Pasa por el filtro inteligente de bebida
                         prod_final = aplicar_bebida_desayuno(row['categoria'], row['producto'])
                         
                         st.session_state.pedido_temporal.append({
@@ -246,7 +240,6 @@ with col_m:
     with st.expander("🍔 COMIDA", expanded=True):
         t1, t2, t3 = st.tabs(["🍳 Desayuno", "🍲 Almuerzo", "🌙 Cena"])
         with t1: 
-            # === AQUÍ ESTÁ LA MAGIA PARA LAS BEBIDAS DEL DESAYUNO ===
             st.radio("☕ Bebida incluida (Solo sándwiches/atún):", ["Ninguna", "Té", "Café", "Mate"], horizontal=True, key="bebida_desayuno")
             mostrar_seccion("Desayuno", "Desayuno")
         with t2: mostrar_seccion("Almuerzo", "Almuerzo")
@@ -319,7 +312,6 @@ with col_p:
                     cat_mayuscula = filtro_estricto(item.get("categoria", "")).upper()
                     
                     if cat_mayuscula in ["DESAYUNO", "ALMUERZO", "CENA"]:
-                        # El producto aquí ya viene con el "+ TE" si aplicaba
                         prod_limpio = item.get("producto", "")
                         clave = (prod_limpio, cat_mayuscula)
                         conteo_comidas[clave] = conteo_comidas.get(clave, 0) + 1
@@ -327,15 +319,31 @@ with col_p:
                 html_tickets = ""
                 
                 if conteo_comidas:
-                    fecha_ticket = obtener_hora_chile().strftime("%d/%m/%y %H:%M")
+                    fecha_ticket = obtener_hora_chile().strftime("%d/%m/%y, %H:%M")
                     
                     for (prod, cat), cantidad in conteo_comidas.items():
                         texto_cantidad = f"{cantidad}x " if cantidad > 1 else ""
+                        
+                        # --- DISEÑO: Separar comida de bebida si hay un signo "+" ---
+                        if " + " in prod:
+                            partes = prod.split(" + ")
+                            comida_principal = partes[0]
+                            # Bebida más chica (20px) debajo de la comida (28px)
+                            bebida_agregada = f"<div style='font-size: 20px; font-weight: bold; margin-top: 2px; color: #000;'>+ {partes[1]}</div>"
+                        else:
+                            comida_principal = prod
+                            bebida_agregada = ""
+
                         html_tickets += f"""
-                        <div style="page-break-after: always; text-align: center; color: black; padding-top: 5px;">
-                            <div style="font-size: 14px; margin-bottom: 5px;">{fecha_ticket}<br>RESTAURANTE SANTOS</div>
-                            <div style="font-size: 26px; font-weight: bold; line-height: 1.2;">{texto_cantidad}{prod}</div>
-                            <div style="font-size: 16px; margin-top: 5px;">({cat})</div>
+                        <div style="page-break-after: always; text-align: left; width: 100%; font-family: 'Arial', sans-serif; padding: 0; margin: 0;">
+                            <p style="font-size: 12px; margin: 0; color: #000;">{fecha_ticket}</p>
+                            <p style="font-size: 12px; margin: 0; margin-bottom: 15px; color: #000;">Restaurante Santos</p>
+                            
+                            <div style="text-align: center; margin-top: 10px;">
+                                <h1 style="font-size: 28px; margin: 0; font-weight: bold; text-transform: uppercase; line-height: 1.1;">{texto_cantidad}{comida_principal}</h1>
+                                {bebida_agregada}
+                                <p style="font-size: 14px; margin: 5px 0 20px 0; text-transform: uppercase; color: #000;">({cat})</p>
+                            </div>
                         </div>
                         """
                     
