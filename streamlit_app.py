@@ -20,14 +20,16 @@ def formatear_hora_supabase(fecha_utc_str):
     except:
         return fecha_utc_str
 
-# --- 🛡️ FILTRO DE HIERRO ANTI-BASURA ---
+# --- 🛡️ FILTRO ANTI-COLAPSO DE MEMORIA (Texto puro ultraligero) ---
 def filtro_estricto(texto):
     if not texto: return ""
     texto_str = str(texto)
-    # Quita tildes y símbolos raros
+    # Quita tildes reales
     texto_sin_tildes = ''.join(c for c in unicodedata.normalize('NFD', texto_str) if unicodedata.category(c) != 'Mn')
-    # Solo deja letras, números y espacios
-    texto_limpio = re.sub(r'[^a-zA-Z0-9\s$().,-]', '', texto_sin_tildes)
+    # Quita las ñ que a veces marean a las Xprinter
+    texto_sin_tildes = texto_sin_tildes.replace('ñ', 'n').replace('Ñ', 'N')
+    # Permite solo el alfabeto basico, numeros y espacios. NADA MAS.
+    texto_limpio = re.sub(r'[^a-zA-Z0-9\s]', '', texto_sin_tildes)
     return texto_limpio.strip()
 
 # 🎨 Configuración de pantalla
@@ -296,7 +298,6 @@ with col_p:
                 for item in st.session_state.pedido_temporal:
                     cat_mayuscula = filtro_estricto(item.get("categoria", "")).upper()
                     
-                    # FILTRO ABSOLUTO: Si no es comida, SE IGNORA TOTALMENTE.
                     if cat_mayuscula in ["DESAYUNO", "ALMUERZO", "CENA"]:
                         prod_limpio = filtro_estricto(item.get("producto", ""))
                         clave = (prod_limpio, item.get("categoria", ""))
@@ -308,7 +309,6 @@ with col_p:
                     fecha_ticket = obtener_hora_chile().strftime("%d/%m/%y, %H:%M")
                     
                     for (prod, cat), cantidad in conteo_comidas.items():
-                        # AQUI ESTA LA 'x' QUE ROMPE EL PATRON DE ERROR
                         texto_cantidad = f"{cantidad}x " if cantidad > 1 else ""
                         html_tickets += f"""
                         <div style="page-break-after: always; text-align: left; width: 100%; font-family: 'Arial', sans-serif; padding: 0; margin: 0;">
@@ -326,13 +326,7 @@ with col_p:
                     <meta charset="UTF-8">
                     <style>
                         @page { margin-top: 0.5cm; margin-bottom: 0cm; margin-left: 0.1cm; margin-right: 0.1cm; } 
-                        body { 
-                            margin: 0; 
-                            padding: 0; 
-                            font-family: 'Arial', sans-serif; 
-                            /* EL TRUCO DE LA FOTO: Obliga a imprimir como imagen, CERO LETRAS CHINAS */
-                            opacity: 0.99; 
-                        }
+                        body { margin: 0; padding: 0; font-family: 'Arial', sans-serif; }
                     </style>
                     """
                     cierre = """
