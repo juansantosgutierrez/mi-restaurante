@@ -5,10 +5,8 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 import streamlit.components.v1 as components
 import time
-import re
-import unicodedata
 
-# --- 🕒 FUNCIONES DE HORA ---
+# --- 🕒 FUNCIONES DE HORA CHILENA ---
 def obtener_hora_chile():
     return datetime.now(ZoneInfo("America/Santiago"))
 
@@ -20,18 +18,12 @@ def formatear_hora_supabase(fecha_utc_str):
     except:
         return fecha_utc_str
 
-# --- 🧹 LIMPIEZA TOTAL (Bloquea los códigos invisibles del escáner) ---
-def limpiar_texto(texto):
-    if not texto: return ""
-    texto_str = str(texto)
-    texto_sin_tildes = ''.join(c for c in unicodedata.normalize('NFD', texto_str) if unicodedata.category(c) != 'Mn')
-    # Permite solo letras, números y espacios. Destruye la basura oculta de la Coca-Cola.
-    texto_limpio = re.sub(r'[^a-zA-Z0-9\s$().,-]', '', texto_sin_tildes)
-    return texto_limpio.strip()
-
 # 🎨 Configuración de pantalla
 st.set_page_config(page_title="Restaurante Santos", layout="wide")
 
+# ==========================================
+# CONFIGURACIÓN DE SUPABASE ⚡
+# ==========================================
 URL_SUPABASE = "https://luklxueplpxdktreuloa.supabase.co"
 KEY_SUPABASE = "sb_publishable_KxAtLO6z0_4SUtbpQDWekQ_mKXZZebX"
 supabase: Client = create_client(URL_SUPABASE, KEY_SUPABASE)
@@ -40,7 +32,6 @@ st.markdown("""
     <style>
     [data-testid="stSidebarUserContent"] { padding-top: 1rem; }
     .stColumn > div { position: sticky; top: 50px; height: auto; }
-    
     div[data-testid="stTextInput"]:has(input[placeholder="oculto_scanner"]) {
         position: absolute !important;
         left: -9999px !important;
@@ -76,8 +67,8 @@ def modal_nuevo(cat):
     c = st.text_input("Código de Barras (Opcional - Pistolea aquí)")
     if st.button("Guardar"):
         if n and p is not None and p > 0:
-            datos_nuevos = {"categoria": cat, "producto": limpiar_texto(n), "monto": int(p)}
-            if c: datos_nuevos["codigo"] = limpiar_texto(c)
+            datos_nuevos = {"categoria": cat, "producto": n.strip(), "monto": int(p)}
+            if c: datos_nuevos["codigo"] = c.strip()
             supabase.table("menu_dia").insert(datos_nuevos).execute()
             st.cache_data.clear() 
             st.rerun()
@@ -88,7 +79,7 @@ def modal_otros():
     m = st.number_input("Monto ($)", min_value=0, step=100, value=None, placeholder="Ej: 5000")
     if st.button("Agregar al Pedido"):
         if desc and m is not None and m > 0:
-            st.session_state.pedido_temporal.append({"categoria": "Otros", "producto": limpiar_texto(desc), "monto": int(m)})
+            st.session_state.pedido_temporal.append({"categoria": "Otros", "producto": desc.strip(), "monto": int(m)})
             st.rerun()
 
 @st.dialog("💸 Gasto")
@@ -99,7 +90,7 @@ def modal_gastos():
     d = st.text_input("Descripción")
     if st.button("Guardar Gasto"):
         if m is not None and m > 0:
-            supabase.table("gastos").insert({"monto": int(m), "descripcion": limpiar_texto(d)}).execute()
+            supabase.table("gastos").insert({"monto": int(m), "descripcion": d.strip()}).execute()
             st.success("Gasto guardado correctamente")
             st.rerun()
 
@@ -111,7 +102,7 @@ def modal_debo():
         desc = st.text_input("Descripción (Ej: Vuelto pendiente $1000)")
         if st.button("💾 Guardar Registro", type="primary"):
             if nom and desc:
-                datos = {"nombre": limpiar_texto(nom), "descripcion": limpiar_texto(desc)}
+                datos = {"nombre": nom.strip(), "descripcion": desc.strip()}
                 if mon is not None and mon > 0: datos["monto"] = int(mon)
                 supabase.table("debo").insert(datos).execute()
                 st.rerun() 
@@ -147,7 +138,7 @@ def modal_debo():
             st.markdown("---")
 
 def procesar_scanner():
-    codigo_leido = limpiar_texto(st.session_state.lector_codigo)
+    codigo_leido = str(st.session_state.lector_codigo).strip()
     if codigo_leido:
         menu_actual = leer_menu_rapido() 
         if "codigo" in menu_actual.columns:
@@ -156,11 +147,11 @@ def procesar_scanner():
             if not producto_encontrado.empty:
                 row = producto_encontrado.iloc[0]
                 st.session_state.pedido_temporal.append({
-                    "categoria": limpiar_texto(row['categoria']), 
-                    "producto": limpiar_texto(row['producto']), 
+                    "categoria": str(row['categoria']).strip(), 
+                    "producto": str(row['producto']).strip(), 
                     "monto": row['monto']
                 })
-                st.session_state.msj_scanner = f"✅ {limpiar_texto(row['producto'])} agregado."
+                st.session_state.msj_scanner = f"✅ {str(row['producto']).strip()} agregado."
             else:
                 st.session_state.msj_scanner = "❌ Producto no encontrado."
         else:
@@ -207,8 +198,8 @@ with col_m:
                     p_f = f"${int(row['monto']):,}".replace(",", ".")
                     if st.button(f"{row['producto']}\n\n{p_f}", key=f"b_{row['id']}", use_container_width=True):
                         st.session_state.pedido_temporal.append({
-                            "categoria": limpiar_texto(row['categoria']), 
-                            "producto": limpiar_texto(row['producto']), 
+                            "categoria": str(row['categoria']).strip(), 
+                            "producto": str(row['producto']).strip(), 
                             "monto": row['monto']
                         })
                         st.rerun()
@@ -273,11 +264,10 @@ with col_p:
             try:
                 ventas_to_insert = []
                 
-                # 1. Guardar en BD
+                # Guardar en BD
                 for item in st.session_state.pedido_temporal:
-                    cat_limpia = limpiar_texto(item.get("categoria", ""))
+                    cat_limpia = str(item.get("categoria", "")).strip()
                     es_comida = cat_limpia in ["Desayuno", "Almuerzo", "Cena"]
-                    
                     ventas_to_insert.append({
                         "producto": item["producto"],
                         "monto": int(item["monto"]),
@@ -288,12 +278,12 @@ with col_p:
 
                 supabase.table("ventas").insert(ventas_to_insert).execute()
                 
-                # 2. Agrupar SOLO LAS COMIDAS para el ticket de cocina
+                # Agrupar SOLO LAS COMIDAS para el ticket de cocina
                 conteo_comidas = {}
                 for item in st.session_state.pedido_temporal:
-                    cat_limpia = limpiar_texto(item.get("categoria", ""))
+                    cat_limpia = str(item.get("categoria", "")).strip()
                     if cat_limpia in ["Desayuno", "Almuerzo", "Cena"]:
-                        prod = limpiar_texto(item.get("producto", ""))
+                        prod = str(item.get("producto", "")).strip()
                         clave = (prod, cat_limpia)
                         conteo_comidas[clave] = conteo_comidas.get(clave, 0) + 1
 
@@ -314,33 +304,27 @@ with col_p:
                     </div>
                     """
                 
-                # SI HAY COMIDA (html_tickets NO ESTÁ VACÍO), MANDAMOS A IMPRIMIR
+                # SI HAY COMIDA, MANDAMOS A IMPRIMIR (y agregamos un ID único para evitar caché/letras chinas)
                 if html_tickets:
+                    sello_invisible = f"<div style='display: none;'>{time.time()}</div>"
+                    
                     estilo = """
-                    <!DOCTYPE html>
-                    <html lang="es">
-                    <head>
-                        <meta charset="UTF-8">
-                        <style>
-                            * { font-family: 'Arial', sans-serif !important; }
-                            @page { margin-top: 0.5cm; margin-bottom: 0cm; margin-left: 0.1cm; margin-right: 0.1cm; } 
-                            body { margin: 0; padding: 0; }
-                        </style>
-                    </head>
-                    <body>
+                    <meta charset="UTF-8">
+                    <style>
+                        @page { margin-top: 0.5cm; margin-bottom: 0cm; margin-left: 0.1cm; margin-right: 0.1cm; } 
+                        body { margin: 0; padding: 0; font-family: 'Arial', sans-serif; }
+                    </style>
                     """
                     cierre = """
                         <script>
                             setTimeout(function() { window.print(); }, 500);
                         </script>
-                    </body>
-                    </html>
                     """
-                    components.html(f"{estilo}{html_tickets}{cierre}", height=0)
+                    components.html(f"{estilo}{html_tickets}{sello_invisible}{cierre}", height=0)
                     st.success("✅ Venta registrada e impresión enviada.")
                     time.sleep(2) 
                 else:
-                    # SI NO HAY COMIDA, NO SE IMPRIME ABSOLUTAMENTE NADA (Eliminé el ticket genérico)
+                    # SI NO HAY COMIDA, NO SE IMPRIME NADA
                     st.success("✅ Venta registrada correctamente (Solo bebidas, sin imprimir).")
 
                 st.session_state.pedido_temporal = []
