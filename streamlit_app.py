@@ -28,24 +28,32 @@ if 'pedido_temporal' not in st.session_state:
     st.session_state.pedido_temporal = []
 if 'modo_editor' not in st.session_state:
     st.session_state.modo_editor = False
+if 'msj_scanner' not in st.session_state:
+    st.session_state.msj_scanner = ""
 
 @st.cache_data(ttl=2)
 def leer_menu_rapido():
     try: 
         response = supabase.table("menu_dia").select("*").execute()
         df = pd.DataFrame(response.data)
-        return df if not df.empty else pd.DataFrame(columns=["id", "categoria", "producto", "monto"])
+        return df if not df.empty else pd.DataFrame(columns=["id", "categoria", "producto", "monto", "codigo"])
     except: 
-        return pd.DataFrame(columns=["id", "categoria", "producto", "monto"])
+        return pd.DataFrame(columns=["id", "categoria", "producto", "monto", "codigo"])
 
 # --- MODALES ---
 @st.dialog("➕ Nuevo Producto")
 def modal_nuevo(cat):
     n = st.text_input(f"Nombre del {cat}")
     p = st.number_input("Precio ($)", min_value=0, step=100)
+    c = st.text_input("Código de Barras (Opcional - Pistolea aquí)") # ¡Ahora puedes agregar el código directo!
+    
     if st.button("Guardar"):
         if n and p > 0:
-            supabase.table("menu_dia").insert({"categoria": cat, "producto": n, "monto": int(p)}).execute()
+            datos_nuevos = {"categoria": cat, "producto": n, "monto": int(p)}
+            if c:  # Si pasaste el lector, guarda el código también
+                datos_nuevos["codigo"] = c.strip()
+                
+            supabase.table("menu_dia").insert(datos_nuevos).execute()
             st.cache_data.clear() 
             st.rerun()
 
@@ -77,8 +85,35 @@ def modal_gastos():
         st.success("Gasto guardado")
         st.rerun()
 
-# --- INTERFAZ ---
+# --- CARGAR DATOS ---
 df_menu = leer_menu_rapido()
+
+# --- FUNCIÓN DEL LECTOR DE CÓDIGOS ---
+def procesar_scanner():
+    codigo_leido = st.session_state.lector_codigo.strip()
+    if codigo_leido:
+        if "codigo" in df_menu.columns:
+            # Limpiamos los datos para que compare exacto
+            df_menu['codigo_str'] = df_menu['codigo'].fillna('').astype(str).str.strip()
+            producto_encontrado = df_menu[df_menu['codigo_str'] == codigo_leido]
+            
+            if not producto_encontrado.empty:
+                row = producto_encontrado.iloc[0]
+                st.session_state.pedido_temporal.append({
+                    "categoria": row['categoria'], 
+                    "producto": row['producto'], 
+                    "monto": row['monto']
+                })
+                st.session_state.msj_scanner = f"✅ {row['producto']} agregado."
+            else:
+                st.session_state.msj_scanner = "❌ Producto no encontrado. Agrégalo al menú."
+        else:
+            st.session_state.msj_scanner = "⚠️ Falta la columna 'codigo' en Supabase."
+            
+    # ¡Clave! Limpia la caja automáticamente para el siguiente producto
+    st.session_state.lector_codigo = ""
+
+# --- INTERFAZ ---
 c1, c2, c3 = st.columns([2, 1, 1])
 c1.title("🍴 Restaurante Santos")
 if c2.button("💸 GASTOS", use_container_width=True): modal_gastos()
@@ -95,6 +130,20 @@ if c3.button(txt_btn, use_container_width=True):
 col_m, col_p = st.columns([3, 1])
 
 with col_m:
+    # --- 🔫 CAJA DEL LECTOR DE BARRAS ---
+    st.text_input("🛒 Pistolea el código aquí:", key="lector_codigo", on_change=procesar_scanner)
+    
+    # Mostrar mensaje de éxito o error al pistolear
+    if st.session_state.msj_scanner:
+        if "✅" in st.session_state.msj_scanner:
+            st.success(st.session_state.msj_scanner)
+        else:
+            st.error(st.session_state.msj_scanner)
+        st.session_state.msj_scanner = "" # Borra el mensaje
+        
+    st.divider()
+    # ------------------------------------
+
     def mostrar_seccion(titulo, cat, especial=None):
         st.header(titulo)
         grid = st.columns(5)
