@@ -150,4 +150,160 @@ def procesar_scanner():
             producto_encontrado = menu_actual[menu_actual['codigo_str'] == codigo_leido]
             if not producto_encontrado.empty:
                 row = producto_encontrado.iloc[0]
-                st
+                st.session_state.pedido_temporal.append({
+                    "categoria": row['categoria'], 
+                    "producto": row['producto'], 
+                    "monto": row['monto']
+                })
+                st.session_state.msj_scanner = f"✅ {row['producto']} agregado."
+            else:
+                st.session_state.msj_scanner = "❌ Producto no encontrado."
+        else:
+            st.session_state.msj_scanner = "⚠️ Falta la columna 'codigo'."
+    st.session_state.lector_codigo = ""
+
+# --- CARGAR DATOS ---
+df_menu = leer_menu_rapido()
+
+# --- INTERFAZ PRINCIPAL ---
+c1, c2, c3, c4 = st.columns([2, 1, 1, 1])
+c1.title("🍴 Restaurante Santos")
+if c2.button("💸 GASTOS", use_container_width=True): modal_gastos()
+if c3.button("🤝 DEBO", use_container_width=True): modal_debo()
+
+if c1.button("🔄 Sincronizar Datos"):
+    st.cache_data.clear()
+    st.rerun()
+
+txt_btn = "🔄 CERRAR EDITOR" if st.session_state.modo_editor else "➕ AGREGAR MENU HOY"
+if c4.button(txt_btn, use_container_width=True):
+    st.session_state.modo_editor = not st.session_state.modo_editor
+    st.rerun()
+
+col_m, col_p = st.columns([3, 1])
+
+# COLUMNA IZQUIERDA: MENÚ
+with col_m:
+    def mostrar_seccion(titulo, cat, especial=None):
+        st.header(titulo)
+        grid = st.columns(5)
+        if especial == "Otros":
+            with grid[0]:
+                if st.button("📦\n\nVENTA ESPECIAL", use_container_width=True): modal_otros()
+        else:
+            items = df_menu[df_menu["categoria"] == cat]
+            for i, (idx, row) in enumerate(items.iterrows()):
+                with grid[i % 5]:
+                    if st.session_state.modo_editor:
+                        if st.button("❌", key=f"d_{row['id']}"):
+                            supabase.table("menu_dia").delete().eq("id", row['id']).execute()
+                            st.cache_data.clear()
+                            st.rerun()
+                    p_f = f"${int(row['monto']):,}".replace(",", ".")
+                    if st.button(f"{row['producto']}\n\n{p_f}", key=f"b_{row['id']}", use_container_width=True):
+                        st.session_state.pedido_temporal.append({"categoria": row['categoria'], "producto": row['producto'], "monto": row['monto']})
+                        st.rerun()
+            
+            if st.session_state.modo_editor:
+                with grid[len(items) % 5]:
+                    btn_label = "➕\n\nNuevo\n" + str(titulo)
+                    if st.button(btn_label, key="add_btn_" + cat, use_container_width=True):
+                        modal_nuevo(cat)
+
+    with st.expander("🍔 COMIDA", expanded=True):
+        t1, t2, t3 = st.tabs(["🍳 Desayuno", "🍲 Almuerzo", "🌙 Cena"])
+        with t1: mostrar_seccion("Desayuno", "Desayuno")
+        with t2: mostrar_seccion("Almuerzo", "Almuerzo")
+        with t3: mostrar_seccion("Cena", "Cena")
+    
+    mostrar_seccion("🥤 BEBESTIBLE", "Bebestible")
+    mostrar_seccion("🏪 TIENDA", "Tienda")
+    mostrar_seccion("🍺 CHELA", "Chela")
+    mostrar_seccion("📦 OTROS", "Otros", especial="Otros")
+
+# COLUMNA DERECHA: CARRITO Y ESCÁNER INVISIBLE
+with col_p:
+    st.text_input("Lector Oculto", key="lector_codigo", on_change=procesar_scanner, placeholder="oculto_scanner", label_visibility="collapsed")
+    
+    components.html("""
+        <script>
+        function enfocarLector() {
+            var parent = window.parent.document;
+            var activo = parent.activeElement;
+            if (activo && (activo.tagName === 'INPUT' || activo.tagName === 'TEXTAREA')) {
+                if (activo.placeholder !== "oculto_scanner") { return; }
+            }
+            var lector = parent.querySelector('input[placeholder="oculto_scanner"]');
+            if (lector) { lector.focus(); }
+        }
+        setInterval(enfocarLector, 500);
+        </script>
+    """, height=0)
+    
+    if st.session_state.msj_scanner:
+        if "✅" in st.session_state.msj_scanner: st.success(st.session_state.msj_scanner)
+        else: st.error(st.session_state.msj_scanner)
+        st.session_state.msj_scanner = ""
+
+    st.subheader("📝 Pedido Actual")
+    total = sum(int(i["monto"]) for i in st.session_state.pedido_temporal)
+    
+    for i, item in enumerate(st.session_state.pedido_temporal):
+        p_i = f"${int(item['monto']):,}".replace(",", ".")
+        ctx, cbt = st.columns([4, 1])
+        ctx.write(f"• {item['producto']} ({p_i})")
+        if cbt.button("🗑️", key=f"del_ped_{i}"):
+            st.session_state.pedido_temporal.pop(i)
+            st.rerun()
+            
+    st.divider()
+    st.markdown(f"## TOTAL: ${total:,}".replace(",", "."))
+    
+    if st.button("✅ FINALIZAR VENTA", type="primary", use_container_width=True):
+        if st.session_state.pedido_temporal:
+            try:
+                ventas_to_insert = []
+                html_tickets = ""
+                
+                for item in st.session_state.pedido_temporal:
+                    es_comida = item["categoria"] in ["Desayuno", "Almuerzo", "Cena"]
+                    ventas_to_insert.append({
+                        "producto": item["producto"],
+                        "monto": int(item["monto"]),
+                        "categoria": item["categoria"],
+                        "tipo": "PAGADO",
+                        "estado_impresion": "PENDIENTE" if es_comida else "N/A"
+                    })
+                    
+                    if es_comida:
+                        # Dejamos que Supabase imprima limpio con la hora del servidor
+                        html_tickets += f"""
+                        <div style="page-break-after: always; text-align: left; width: 100%; font-family: sans-serif; padding: 0; margin: 0;">
+                            <p style="font-size: 12px; margin: 0; color: #000;">Restaurante Santos</p>
+                            
+                            <div style="text-align: center; margin-top: 20px;">
+                                <h1 style="font-size: 28px; margin: 0; font-weight: bold; text-transform: uppercase; line-height: 1.1;">{item['producto']}</h1>
+                                <p style="font-size: 14px; margin: 5px 0 20px 0; text-transform: uppercase; color: #000;">({item['categoria']})</p>
+                            </div>
+                        </div>
+                        """
+
+                supabase.table("ventas").insert(ventas_to_insert).execute()
+                
+                if html_tickets:
+                    estilo = """
+                    <style>
+                        @page { margin-top: 0.5cm; margin-bottom: 0cm; margin-left: 0.1cm; margin-right: 0.1cm; } 
+                        body { margin: 0; padding: 0; }
+                    </style>
+                    """
+                    components.html(f"{estilo}<script>window.print();</script>{html_tickets}", height=0)
+                    st.success("✅ Venta registrada e impresión enviada.")
+                    time.sleep(2) 
+                else:
+                    st.success("✅ Venta registrada correctamente (Solo bebidas).")
+
+                st.session_state.pedido_temporal = []
+                st.rerun()
+            except Exception as e:
+                st.error(f"Error al guardar: {e}")
