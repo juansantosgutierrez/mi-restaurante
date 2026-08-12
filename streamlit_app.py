@@ -19,11 +19,12 @@ def formatear_hora_supabase(fecha_utc_str):
     except:
         return fecha_utc_str
 
-# --- 🧹 FUNCIÓN PARA ELIMINAR BASURA DEL ESCÁNER ---
+# --- 🧹 LIMPIEZA EXTREMA (MATA LAS LETRAS CHINAS) ---
 def limpiar_texto(texto):
     if not texto: return ""
-    # Mantiene solo letras, números, espacios y signos básicos. ¡Destruye la basura invisible!
-    return re.sub(r'[^\w\sñÑáéíóúÁÉÍÓÚ$().,-]', '', str(texto)).strip()
+    # Esta línea DESTRUYE cualquier código oculto del escáner. Solo permite letras y números normales.
+    texto_limpio = re.sub(r'[^a-zA-Z0-9\sñÑáéíóúÁÉÍÓÚ$().,-]', '', str(texto))
+    return texto_limpio.strip()
 
 # 🎨 Configuración de pantalla
 st.set_page_config(page_title="Restaurante Santos", layout="wide")
@@ -166,7 +167,7 @@ def procesar_scanner():
             producto_encontrado = menu_actual[menu_actual['codigo_str'] == codigo_leido]
             if not producto_encontrado.empty:
                 row = producto_encontrado.iloc[0]
-                # AL CARGAR AL CARRITO, LIMPIAMOS CATEGORÍA Y PRODUCTO DE CUALQUIER BASURA INVISIBLE
+                # Limpiamos todo antes de que entre al carrito
                 st.session_state.pedido_temporal.append({
                     "categoria": limpiar_texto(row['categoria']), 
                     "producto": limpiar_texto(row['producto']), 
@@ -285,7 +286,7 @@ with col_p:
             try:
                 ventas_to_insert = []
                 
-                # 1. Guardamos TODO individual en Supabase
+                # 1. Guardar en BD
                 for item in st.session_state.pedido_temporal:
                     cat_limpia = limpiar_texto(item.get("categoria", ""))
                     es_comida = cat_limpia in ["Desayuno", "Almuerzo", "Cena"]
@@ -300,7 +301,7 @@ with col_p:
 
                 supabase.table("ventas").insert(ventas_to_insert).execute()
                 
-                # 2. AGRUPAMOS solo las comidas para la impresión
+                # 2. Agrupar para ticket de cocina
                 conteo_comidas = {}
                 for item in st.session_state.pedido_temporal:
                     cat_limpia = limpiar_texto(item.get("categoria", ""))
@@ -326,6 +327,7 @@ with col_p:
                     </div>
                     """
                 
+                # Si solo compró bebidas, se hace un ticket chiquitito para que patee la caja registradora
                 if not html_tickets:
                     html_tickets = f"""
                     <div style="text-align: center; width: 100%; font-family: sans-serif; padding: 0; margin: 0;">
