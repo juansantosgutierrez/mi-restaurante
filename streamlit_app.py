@@ -2,8 +2,23 @@ import streamlit as st
 from supabase import create_client, Client
 import pandas as pd
 from datetime import datetime
+from zoneinfo import ZoneInfo
 import streamlit.components.v1 as components
 import time
+
+# --- 🕒 FUNCIONES DE HORA CHILENA INTELIGENTE ---
+def obtener_hora_chile():
+    # Usa el huso horario oficial, detecta solo los cambios de verano/invierno
+    return datetime.now(ZoneInfo("America/Santiago"))
+
+def formatear_hora_supabase(fecha_utc_str):
+    try:
+        # Convierte la hora global de Supabase a la hora exacta de Chile
+        dt = datetime.fromisoformat(fecha_utc_str.replace('Z', '+00:00'))
+        dt_chile = dt.astimezone(ZoneInfo("America/Santiago"))
+        return dt_chile.strftime("%H:%M hrs")
+    except:
+        return fecha_utc_str
 
 # 🎨 Configuración de pantalla
 st.set_page_config(page_title="Restaurante Santos", layout="wide")
@@ -77,7 +92,8 @@ def modal_otros():
 
 @st.dialog("💸 Gasto")
 def modal_gastos():
-    st.info("🕒 **Registro de Gasto** (La hora se guarda automáticamente)")
+    ahora = obtener_hora_chile()
+    st.info(f"🕒 **Registro de Gasto** ({ahora.strftime('%H:%M')} hrs)")
     m = st.number_input("Monto ($)", min_value=0, step=500, value=None, placeholder="Ej: 10000")
     d = st.text_input("Descripción")
     
@@ -109,7 +125,7 @@ def modal_debo():
     st.divider()
     
     st.caption("📅 Registros del día:")
-    fecha_sel = st.date_input("Fecha", datetime.now(), label_visibility="collapsed")
+    fecha_sel = st.date_input("Fecha", obtener_hora_chile().date(), label_visibility="collapsed")
     fecha_ini = f"{fecha_sel}T00:00:00"
     fecha_fin = f"{fecha_sel}T23:59:59"
     
@@ -129,12 +145,8 @@ def modal_debo():
                 st.markdown(f"**👤 {item['nombre']}**{monto_str}")
                 st.caption(f"📝 {item.get('descripcion', '')}")
             with c2:
-                try:
-                    dt = datetime.fromisoformat(item['created_at'].replace('Z', '+00:00'))
-                    f_format = dt.strftime("%H:%M hrs")
-                except:
-                    f_format = item.get('created_at', '')
-                st.caption(f"🕒 {f_format}")
+                hora_bonita = formatear_hora_supabase(item.get('created_at', ''))
+                st.caption(f"🕒 {hora_bonita}")
             with c3:
                 if st.button("↩️ Devolver", key=f"dev_{item['id']}"):
                     supabase.table("debo").delete().eq("id", item['id']).execute()
@@ -263,8 +275,8 @@ with col_p:
         if st.session_state.pedido_temporal:
             try:
                 ventas_to_insert = []
-                html_tickets = ""
                 
+                # 1. Guardamos TODO individual en Supabase
                 for item in st.session_state.pedido_temporal:
                     es_comida = item["categoria"] in ["Desayuno", "Almuerzo", "Cena"]
                     ventas_to_insert.append({
@@ -274,34 +286,53 @@ with col_p:
                         "tipo": "PAGADO",
                         "estado_impresion": "PENDIENTE" if es_comida else "N/A"
                     })
-                    
-                    if es_comida:
-                        # Dejamos que Supabase imprima limpio con la hora del servidor
-                        html_tickets += f"""
-                        <div style="page-break-after: always; text-align: left; width: 100%; font-family: sans-serif; padding: 0; margin: 0;">
-                            <p style="font-size: 12px; margin: 0; color: #000;">Restaurante Santos</p>
-                            
-                            <div style="text-align: center; margin-top: 20px;">
-                                <h1 style="font-size: 28px; margin: 0; font-weight: bold; text-transform: uppercase; line-height: 1.1;">{item['producto']}</h1>
-                                <p style="font-size: 14px; margin: 5px 0 20px 0; text-transform: uppercase; color: #000;">({item['categoria']})</p>
-                            </div>
-                        </div>
-                        """
 
                 supabase.table("ventas").insert(ventas_to_insert).execute()
                 
-                if html_tickets:
-                    estilo = """
-                    <style>
-                        @page { margin-top: 0.5cm; margin-bottom: 0cm; margin-left: 0.1cm; margin-right: 0.1cm; } 
-                        body { margin: 0; padding: 0; }
-                    </style>
+                # 2. AGRUPAMOS solo para la impresión
+                conteo_comidas = {}
+                for item in st.session_state.pedido_temporal:
+                    if item["categoria"] in ["Desayuno", "Almuerzo", "Cena"]:
+                        prod = item["producto"]
+                        cat = item["categoria"]
+                        clave = (prod, cat)
+                        conteo_comidas[clave] = conteo_comidas.get(clave, 0) + 1
+
+                html_tickets = ""
+                # Toma la hora exacta de Chile al momento de imprimir
+                fecha_ticket = obtener_hora_chile().strftime("%d/%m/%y, %H:%M")
+                
+                for (prod, cat), cantidad in conteo_comidas.items():
+                    texto_cantidad = f"{cantidad} " if cantidad > 1 else ""
+                    html_tickets += f"""
+                    <div style="page-break-after: always; text-align: left; width: 100%; font-family: sans-serif; padding: 0; margin: 0;">
+                        <p style="font-size: 12px; margin: 0; color: #000;">{fecha_ticket}</p>
+                        <p style="font-size: 12px; margin: 0; margin-bottom: 15px; color: #000;">Restaurante Santos</p>
+                        
+                        <div style="text-align: center; margin-top: 20px;">
+                            <h1 style="font-size: 28px; margin: 0; font-weight: bold; text-transform: uppercase; line-height: 1.1;">{texto_cantidad}{prod}</h1>
+                            <p style="font-size: 14px; margin: 5px 0 20px 0; text-transform: uppercase; color: #000;">({cat})</p>
+                        </div>
+                    </div>
                     """
-                    components.html(f"{estilo}<script>window.print();</script>{html_tickets}", height=0)
-                    st.success("✅ Venta registrada e impresión enviada.")
-                    time.sleep(2) 
-                else:
-                    st.success("✅ Venta registrada correctamente (Solo bebidas).")
+                
+                if not html_tickets:
+                    html_tickets = f"""
+                    <div style="text-align: center; width: 100%; font-family: sans-serif; padding: 0; margin: 0;">
+                        <p style="font-size: 12px; margin: 0; font-weight: bold;">TICKET DE VENTA</p>
+                        <p style="font-size: 14px; margin: 0;">TOTAL: ${total:,}</p>
+                    </div>
+                    """.replace(",", ".")
+                
+                estilo = """
+                <style>
+                    @page { margin-top: 0.5cm; margin-bottom: 0cm; margin-left: 0.1cm; margin-right: 0.1cm; } 
+                    body { margin: 0; padding: 0; }
+                </style>
+                """
+                components.html(f"{estilo}<script>window.print();</script>{html_tickets}", height=0)
+                st.success("✅ Venta registrada e impresión enviada.")
+                time.sleep(2) 
 
                 st.session_state.pedido_temporal = []
                 st.rerun()
