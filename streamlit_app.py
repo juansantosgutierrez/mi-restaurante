@@ -6,7 +6,7 @@ from zoneinfo import ZoneInfo
 import streamlit.components.v1 as components
 import time
 import re
-import uuid
+import unicodedata
 
 # --- 🕒 FUNCIONES DE HORA CHILENA ---
 def obtener_hora_chile():
@@ -20,12 +20,14 @@ def formatear_hora_supabase(fecha_utc_str):
     except:
         return fecha_utc_str
 
-# --- 🛡️ FILTRO DE HIERRO ANTI-LETRAS CHINAS ---
+# --- 🛡️ FILTRO DE HIERRO ANTI-BASURA ---
 def filtro_estricto(texto):
     if not texto: return ""
-    # Esta línea DESTRUYE por completo cualquier código invisible del escáner.
-    # Solo permite letras normales, números y signos básicos.
-    texto_limpio = re.sub(r'[^a-zA-Z0-9\sñÑáéíóúÁÉÍÓÚ$().,-]', '', str(texto))
+    texto_str = str(texto)
+    # Quita tildes y símbolos raros
+    texto_sin_tildes = ''.join(c for c in unicodedata.normalize('NFD', texto_str) if unicodedata.category(c) != 'Mn')
+    # Solo deja letras, números y espacios
+    texto_limpio = re.sub(r'[^a-zA-Z0-9\s$().,-]', '', texto_sin_tildes)
     return texto_limpio.strip()
 
 # 🎨 Configuración de pantalla
@@ -148,7 +150,6 @@ def modal_debo():
             st.markdown("---")
 
 def procesar_scanner():
-    # Limpiamos inmediatamente lo que lee el escáner
     codigo_leido = filtro_estricto(st.session_state.lector_codigo)
     if codigo_leido:
         menu_actual = leer_menu_rapido() 
@@ -157,7 +158,6 @@ def procesar_scanner():
             producto_encontrado = menu_actual[menu_actual['codigo_str'] == codigo_leido]
             if not producto_encontrado.empty:
                 row = producto_encontrado.iloc[0]
-                # Guardamos al pedido los textos 100% limpios
                 st.session_state.pedido_temporal.append({
                     "categoria": filtro_estricto(row['categoria']), 
                     "producto": filtro_estricto(row['producto']), 
@@ -294,10 +294,9 @@ with col_p:
                 # 2. SEPARAR ESTRICTAMENTE SOLO LAS COMIDAS PARA IMPRIMIR
                 conteo_comidas = {}
                 for item in st.session_state.pedido_temporal:
-                    # Lo pasamos a mayúscula para que no falle si en la base de datos dice "desayuno" o "Desayuno"
                     cat_mayuscula = filtro_estricto(item.get("categoria", "")).upper()
                     
-                    # FILTRO ABSOLUTO: Si no es una de estas 3, SE IGNORA. Las bebidas jamás pasarán de aquí.
+                    # FILTRO ABSOLUTO: Si no es comida, SE IGNORA TOTALMENTE.
                     if cat_mayuscula in ["DESAYUNO", "ALMUERZO", "CENA"]:
                         prod_limpio = filtro_estricto(item.get("producto", ""))
                         clave = (prod_limpio, item.get("categoria", ""))
@@ -305,12 +304,12 @@ with col_p:
 
                 html_tickets = ""
                 
-                # Solo arma el ticket si encontró comida en el filtro anterior
                 if conteo_comidas:
                     fecha_ticket = obtener_hora_chile().strftime("%d/%m/%y, %H:%M")
                     
                     for (prod, cat), cantidad in conteo_comidas.items():
-                        texto_cantidad = f"{cantidad} " if cantidad > 1 else ""
+                        # AQUI ESTA LA 'x' QUE ROMPE EL PATRON DE ERROR
+                        texto_cantidad = f"{cantidad}x " if cantidad > 1 else ""
                         html_tickets += f"""
                         <div style="page-break-after: always; text-align: left; width: 100%; font-family: 'Arial', sans-serif; padding: 0; margin: 0;">
                             <p style="font-size: 12px; margin: 0; color: #000;">{fecha_ticket}</p>
@@ -323,14 +322,17 @@ with col_p:
                         </div>
                         """
                     
-                    # Sello único (UUID) para que la memoria del PC no recicle tickets y colapse
-                    sello_invisible = f"<div id='{uuid.uuid4()}' style='display: none;'></div>"
-                    
                     estilo = """
                     <meta charset="UTF-8">
                     <style>
                         @page { margin-top: 0.5cm; margin-bottom: 0cm; margin-left: 0.1cm; margin-right: 0.1cm; } 
-                        body { margin: 0; padding: 0; font-family: 'Arial', sans-serif; }
+                        body { 
+                            margin: 0; 
+                            padding: 0; 
+                            font-family: 'Arial', sans-serif; 
+                            /* EL TRUCO DE LA FOTO: Obliga a imprimir como imagen, CERO LETRAS CHINAS */
+                            opacity: 0.99; 
+                        }
                     </style>
                     """
                     cierre = """
@@ -338,11 +340,10 @@ with col_p:
                             setTimeout(function() { window.print(); }, 500);
                         </script>
                     """
-                    components.html(f"{estilo}{html_tickets}{sello_invisible}{cierre}", height=0)
+                    components.html(f"{estilo}{html_tickets}{cierre}", height=0)
                     st.success("✅ Venta de comida registrada e impresión enviada a cocina.")
                     time.sleep(2) 
                 else:
-                    # Si solo fueron bebidas, llega aquí y NO SE MANDA A IMPRIMIR NADA
                     st.success("✅ Venta de bebidas registrada. (Ignoradas en impresión).")
 
                 st.session_state.pedido_temporal = []
