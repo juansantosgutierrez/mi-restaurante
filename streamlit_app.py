@@ -41,6 +41,8 @@ if 'modo_editor' not in st.session_state:
     st.session_state.modo_editor = False
 if 'msj_scanner' not in st.session_state:
     st.session_state.msj_scanner = ""
+if 'vista_debo' not in st.session_state:
+    st.session_state.vista_debo = "lista"
 
 @st.cache_data(ttl=2)
 def leer_menu_rapido():
@@ -94,6 +96,77 @@ def modal_gastos():
             st.success("Gasto guardado correctamente")
             st.rerun()
 
+# --- MODAL DEBO (LISTA Y AGREGAR) ---
+@st.dialog("🤝 Registro DEBO / Vueltos Pendientes")
+def modal_debo():
+    if st.session_state.vista_debo == "lista":
+        st.caption("📅 Selecciona una fecha para ver los registros:")
+        fecha_sel = st.date_input("Fecha", datetime.now(), label_visibility="collapsed")
+        
+        fecha_ini = f"{fecha_sel}T00:00:00"
+        fecha_fin = f"{fecha_sel}T23:59:59"
+        
+        try:
+            res = supabase.table("debo").select("*").gte("created_at", fecha_ini).lte("created_at", fecha_fin).order("created_at", desc=True).execute()
+            registros = res.data
+        except Exception as err:
+            registros = []
+            st.error(f"Error al cargar registros: {err}")
+            
+        st.divider()
+        
+        if not registros:
+            st.info("ℹ️ No hay registros pendientes para esta fecha.")
+        else:
+            for item in registros:
+                c1, c2, c3 = st.columns([3, 3, 2])
+                with c1:
+                    monto_str = f" (${int(item['monto']):,})".replace(",", ".") if item.get('monto') else ""
+                    st.markdown(f"**👤 {item['nombre']}**{monto_str}")
+                    st.caption(f"📝 {item.get('descripcion', '')}")
+                with c2:
+                    try:
+                        dt = datetime.fromisoformat(item['created_at'].replace('Z', '+00:00'))
+                        f_format = dt.strftime("%d/%m/%Y %H:%M")
+                    except:
+                        f_format = item.get('created_at', '')
+                    st.caption(f"🕒 {f_format}")
+                with c3:
+                    if st.button("↩️ Devolver", key=f"dev_{item['id']}"):
+                        supabase.table("debo").delete().eq("id", item['id']).execute()
+                        st.success("Devuelto y eliminado.")
+                        time.sleep(0.5)
+                        st.rerun()
+                st.markdown("---")
+
+        st.write("")
+        if st.button("➕ Agregar Registro", use_container_width=True, type="primary"):
+            st.session_state.vista_debo = "agregar"
+            st.rerun()
+
+    elif st.session_state.vista_debo == "agregar":
+        st.subheader("➕ Nuevo Registro Pendiente")
+        nom = st.text_input("Nombre de la persona")
+        mon = st.number_input("Monto ($)", min_value=0, step=100, value=None, placeholder="Ej: 2000 (Opcional)")
+        desc = st.text_input("Descripción (Ej: Vuelto pendiente $1000)")
+        
+        col_g, col_c = st.columns(2)
+        with col_g:
+            if st.button("💾 Guardar", use_container_width=True, type="primary"):
+                if nom and desc:
+                    datos = {"nombre": nom, "descripcion": desc}
+                    if mon is not None and mon > 0:
+                        datos["monto"] = int(mon)
+                    supabase.table("debo").insert(datos).execute()
+                    st.session_state.vista_debo = "lista"
+                    st.rerun()
+                else:
+                    st.error("Ingresa al menos el nombre y la descripción.")
+        with col_c:
+            if st.button("❌ Cancelar", use_container_width=True):
+                st.session_state.vista_debo = "lista"
+                st.rerun()
+
 # --- FUNCIÓN DEL LECTOR DE CÓDIGOS INVISIBLE ---
 def procesar_scanner():
     codigo_leido = st.session_state.lector_codigo.strip()
@@ -122,16 +195,19 @@ def procesar_scanner():
 df_menu = leer_menu_rapido()
 
 # --- INTERFAZ PRINCIPAL ---
-c1, c2, c3 = st.columns([2, 1, 1])
+c1, c2, c3, c4 = st.columns([2, 1, 1, 1])
 c1.title("🍴 Restaurante Santos")
 if c2.button("💸 GASTOS", use_container_width=True): modal_gastos()
+if c3.button("🤝 DEBO", use_container_width=True): 
+    st.session_state.vista_debo = "lista"
+    modal_debo()
 
 if c1.button("🔄 Sincronizar Datos"):
     st.cache_data.clear()
     st.rerun()
 
 txt_btn = "🔄 CERRAR EDITOR" if st.session_state.modo_editor else "➕ AGREGAR MENU HOY"
-if c3.button(txt_btn, use_container_width=True):
+if c4.button(txt_btn, use_container_width=True):
     st.session_state.modo_editor = not st.session_state.modo_editor
     st.rerun()
 
