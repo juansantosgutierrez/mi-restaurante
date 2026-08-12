@@ -5,6 +5,7 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 import streamlit.components.v1 as components
 import time
+import re
 
 # --- 🕒 FUNCIONES DE HORA CHILENA INTELIGENTE ---
 def obtener_hora_chile():
@@ -17,6 +18,12 @@ def formatear_hora_supabase(fecha_utc_str):
         return dt_chile.strftime("%H:%M hrs")
     except:
         return fecha_utc_str
+
+# --- 🧹 FUNCIÓN PARA ELIMINAR BASURA DEL ESCÁNER ---
+def limpiar_texto(texto):
+    if not texto: return ""
+    # Mantiene solo letras, números, espacios y signos básicos. ¡Destruye la basura invisible!
+    return re.sub(r'[^\w\sñÑáéíóúÁÉÍÓÚ$().,-]', '', str(texto)).strip()
 
 # 🎨 Configuración de pantalla
 st.set_page_config(page_title="Restaurante Santos", layout="wide")
@@ -72,9 +79,9 @@ def modal_nuevo(cat):
     
     if st.button("Guardar"):
         if n and p is not None and p > 0:
-            datos_nuevos = {"categoria": cat, "producto": n, "monto": int(p)}
+            datos_nuevos = {"categoria": cat, "producto": limpiar_texto(n), "monto": int(p)}
             if c:
-                datos_nuevos["codigo"] = c.strip()
+                datos_nuevos["codigo"] = limpiar_texto(c)
             supabase.table("menu_dia").insert(datos_nuevos).execute()
             st.cache_data.clear() 
             st.rerun()
@@ -85,7 +92,7 @@ def modal_otros():
     m = st.number_input("Monto ($)", min_value=0, step=100, value=None, placeholder="Ej: 5000")
     if st.button("Agregar al Pedido"):
         if desc and m is not None and m > 0:
-            st.session_state.pedido_temporal.append({"categoria": "Otros", "producto": desc, "monto": int(m)})
+            st.session_state.pedido_temporal.append({"categoria": "Otros", "producto": limpiar_texto(desc), "monto": int(m)})
             st.rerun()
 
 @st.dialog("💸 Gasto")
@@ -99,7 +106,7 @@ def modal_gastos():
         if m is not None and m > 0:
             supabase.table("gastos").insert({
                 "monto": int(m), 
-                "descripcion": d.strip()
+                "descripcion": limpiar_texto(d)
             }).execute()
             st.success("Gasto guardado correctamente")
             st.rerun()
@@ -112,7 +119,7 @@ def modal_debo():
         desc = st.text_input("Descripción (Ej: Vuelto pendiente $1000)")
         if st.button("💾 Guardar Registro", type="primary"):
             if nom and desc:
-                datos = {"nombre": nom.strip(), "descripcion": desc.strip()}
+                datos = {"nombre": limpiar_texto(nom), "descripcion": limpiar_texto(desc)}
                 if mon is not None and mon > 0:
                     datos["monto"] = int(mon)
                 supabase.table("debo").insert(datos).execute()
@@ -121,7 +128,6 @@ def modal_debo():
                 st.error("Ingresa al menos el nombre y la descripción.")
 
     st.divider()
-    
     st.caption("📅 Registros del día:")
     fecha_sel = st.date_input("Fecha", obtener_hora_chile().date(), label_visibility="collapsed")
     fecha_ini = f"{fecha_sel}T00:00:00"
@@ -152,8 +158,7 @@ def modal_debo():
             st.markdown("---")
 
 def procesar_scanner():
-    # Limpiamos el texto que tira el escáner para evitar que metan espacios fantasmas
-    codigo_leido = st.session_state.lector_codigo.strip()
+    codigo_leido = limpiar_texto(st.session_state.lector_codigo)
     if codigo_leido:
         menu_actual = leer_menu_rapido() 
         if "codigo" in menu_actual.columns:
@@ -161,13 +166,13 @@ def procesar_scanner():
             producto_encontrado = menu_actual[menu_actual['codigo_str'] == codigo_leido]
             if not producto_encontrado.empty:
                 row = producto_encontrado.iloc[0]
-                # Agregamos al pedido también con .strip() para máxima seguridad
+                # AL CARGAR AL CARRITO, LIMPIAMOS CATEGORÍA Y PRODUCTO DE CUALQUIER BASURA INVISIBLE
                 st.session_state.pedido_temporal.append({
-                    "categoria": str(row['categoria']).strip(), 
-                    "producto": str(row['producto']).strip(), 
+                    "categoria": limpiar_texto(row['categoria']), 
+                    "producto": limpiar_texto(row['producto']), 
                     "monto": row['monto']
                 })
-                st.session_state.msj_scanner = f"✅ {str(row['producto']).strip()} agregado."
+                st.session_state.msj_scanner = f"✅ {limpiar_texto(row['producto'])} agregado."
             else:
                 st.session_state.msj_scanner = "❌ Producto no encontrado."
         else:
@@ -214,8 +219,8 @@ with col_m:
                     p_f = f"${int(row['monto']):,}".replace(",", ".")
                     if st.button(f"{row['producto']}\n\n{p_f}", key=f"b_{row['id']}", use_container_width=True):
                         st.session_state.pedido_temporal.append({
-                            "categoria": str(row['categoria']).strip(), 
-                            "producto": str(row['producto']).strip(), 
+                            "categoria": limpiar_texto(row['categoria']), 
+                            "producto": limpiar_texto(row['producto']), 
                             "monto": row['monto']
                         })
                         st.rerun()
@@ -282,8 +287,7 @@ with col_p:
                 
                 # 1. Guardamos TODO individual en Supabase
                 for item in st.session_state.pedido_temporal:
-                    # Garantizamos que la categoría no traiga espacios fantasmas del escáner
-                    cat_limpia = str(item.get("categoria", "")).strip()
+                    cat_limpia = limpiar_texto(item.get("categoria", ""))
                     es_comida = cat_limpia in ["Desayuno", "Almuerzo", "Cena"]
                     
                     ventas_to_insert.append({
@@ -296,12 +300,12 @@ with col_p:
 
                 supabase.table("ventas").insert(ventas_to_insert).execute()
                 
-                # 2. AGRUPAMOS solo para la impresión
+                # 2. AGRUPAMOS solo las comidas para la impresión
                 conteo_comidas = {}
                 for item in st.session_state.pedido_temporal:
-                    cat_limpia = str(item.get("categoria", "")).strip()
+                    cat_limpia = limpiar_texto(item.get("categoria", ""))
                     if cat_limpia in ["Desayuno", "Almuerzo", "Cena"]:
-                        prod = str(item.get("producto", "")).strip()
+                        prod = limpiar_texto(item.get("producto", ""))
                         clave = (prod, cat_limpia)
                         conteo_comidas[clave] = conteo_comidas.get(clave, 0) + 1
 
@@ -330,7 +334,6 @@ with col_p:
                     </div>
                     """.replace(",", ".")
                 
-                # LA ETIQUETA MAGICA UTF-8 PARA ELIMINAR LOS SIMBOLOS CHINOS
                 estilo = """
                 <meta charset="UTF-8">
                 <style>
