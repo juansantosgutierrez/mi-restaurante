@@ -15,11 +15,22 @@ URL_SUPABASE = "https://luklxueplpxdktreuloa.supabase.co"
 KEY_SUPABASE = "sb_publishable_KxAtLO6z0_4SUtbpQDWekQ_mKXZZebX"
 supabase: Client = create_client(URL_SUPABASE, KEY_SUPABASE)
 
-# CSS para que el Pedido FLOTE y quitar bordes molestos
+# CSS: Hace que el pedido flote y hace INVISIBLE la barra del escáner
 st.markdown("""
     <style>
     [data-testid="stSidebarUserContent"] { padding-top: 1rem; }
     .stColumn > div { position: sticky; top: 50px; height: auto; }
+    
+    /* 🪄 MAGIA: Oculta la barra del escáner pero la mantiene activa en el fondo */
+    div[data-testid="stTextInput"]:has(input[placeholder="oculto_scanner"]) {
+        position: absolute !important;
+        left: -9999px !important;
+        opacity: 0 !important;
+        height: 0px !important;
+        width: 0px !important;
+        margin: 0 !important;
+        padding: 0 !important;
+    }
     </style>
 """, unsafe_allow_html=True)
 
@@ -40,11 +51,11 @@ def leer_menu_rapido():
     except: 
         return pd.DataFrame(columns=["id", "categoria", "producto", "monto", "codigo"])
 
-# --- MODALES (CON EL PROBLEMA DEL 0 CORREGIDO) ---
+# --- MODALES (SIN EL CERO MOLESTO) ---
 @st.dialog("➕ Nuevo Producto")
 def modal_nuevo(cat):
     n = st.text_input(f"Nombre del {cat}")
-    # ¡AQUÍ ESTÁ LA MAGIA! value=None hace que empiece en blanco sin el 0
+    # value=None hace que empiece en blanco sin el 0
     p = st.number_input("Precio ($)", min_value=0, step=100, value=None, placeholder="Ej: 1500")
     c = st.text_input("Código de Barras (Opcional - Pistolea aquí)")
     
@@ -53,7 +64,6 @@ def modal_nuevo(cat):
             datos_nuevos = {"categoria": cat, "producto": n, "monto": int(p)}
             if c:
                 datos_nuevos["codigo"] = c.strip()
-                
             supabase.table("menu_dia").insert(datos_nuevos).execute()
             st.cache_data.clear() 
             st.rerun()
@@ -87,16 +97,14 @@ def modal_gastos():
             st.success("Gasto guardado")
             st.rerun()
 
-# --- CARGAR DATOS ---
-df_menu = leer_menu_rapido()
-
-# --- FUNCIÓN DEL LECTOR DE CÓDIGOS ---
+# --- FUNCIÓN DEL LECTOR DE CÓDIGOS INVISIBLE ---
 def procesar_scanner():
     codigo_leido = st.session_state.lector_codigo.strip()
     if codigo_leido:
-        if "codigo" in df_menu.columns:
-            df_menu['codigo_str'] = df_menu['codigo'].fillna('').astype(str).str.strip()
-            producto_encontrado = df_menu[df_menu['codigo_str'] == codigo_leido]
+        menu_actual = leer_menu_rapido() # Trae los datos frescos
+        if "codigo" in menu_actual.columns:
+            menu_actual['codigo_str'] = menu_actual['codigo'].fillna('').astype(str).str.strip()
+            producto_encontrado = menu_actual[menu_actual['codigo_str'] == codigo_leido]
             
             if not producto_encontrado.empty:
                 row = producto_encontrado.iloc[0]
@@ -109,12 +117,15 @@ def procesar_scanner():
             else:
                 st.session_state.msj_scanner = "❌ Producto no encontrado."
         else:
-            st.session_state.msj_scanner = "⚠️ Falta la columna 'codigo' en Supabase."
+            st.session_state.msj_scanner = "⚠️ Falta la columna 'codigo'."
             
-    # Limpia la caja automáticamente para pistolear de nuevo
+    # Limpia la caja oculta automáticamente
     st.session_state.lector_codigo = ""
 
-# --- INTERFAZ ---
+# --- CARGAR DATOS ---
+df_menu = leer_menu_rapido()
+
+# --- INTERFAZ PRINCIPAL ---
 c1, c2, c3 = st.columns([2, 1, 1])
 c1.title("🍴 Restaurante Santos")
 if c2.button("💸 GASTOS", use_container_width=True): modal_gastos()
@@ -130,7 +141,7 @@ if c3.button(txt_btn, use_container_width=True):
 
 col_m, col_p = st.columns([3, 1])
 
-# COLUMNA IZQUIERDA: EL MENÚ COMO SIEMPRE
+# COLUMNA IZQUIERDA: MENÚ
 with col_m:
     def mostrar_seccion(titulo, cat, especial=None):
         st.header(titulo)
@@ -173,23 +184,32 @@ with col_m:
     mostrar_seccion("🍺 CHELA", "Chela")
     mostrar_seccion("📦 OTROS", "Otros", especial="Otros")
 
-# COLUMNA DERECHA: CARRITO Y CAJA DE LECTOR
+# COLUMNA DERECHA: CARRITO Y ESCÁNER INVISIBLE
 with col_p:
-    # Cajita del escáner discreta y pequeña arriba del carrito
-    st.text_input("🛒 Pasar Lector:", key="lector_codigo", on_change=procesar_scanner, placeholder="Pistolea un código...")
+    # 🔫 ESCÁNER 100% INVISIBLE: Escucha en el fondo todo el tiempo
+    st.text_input("Lector Oculto", key="lector_codigo", on_change=procesar_scanner, placeholder="oculto_scanner", label_visibility="collapsed")
     
-    # Código en Javascript para que la cajita se seleccione SOLA siempre
+    # Este script JavaScript hace que siempre esté listo para pistolear, sin hacer clic
     components.html("""
         <script>
-        setTimeout(function() {
-            var inputs = window.parent.document.querySelectorAll('input[type="text"]');
-            for (var i = 0; i < inputs.length; i++) {
-                if (inputs[i].placeholder === "Pistolea un código...") {
-                    inputs[i].focus();
-                    break;
+        function enfocarLector() {
+            var parent = window.parent.document;
+            var activo = parent.activeElement;
+            
+            // Si estás agregando un menú o escribiendo el precio, deja el teclado en paz
+            if (activo && (activo.tagName === 'INPUT' || activo.tagName === 'TEXTAREA')) {
+                if (activo.placeholder !== "oculto_scanner") {
+                    return; 
                 }
             }
-        }, 100);
+            
+            // Si no estás haciendo nada, la pistola queda activa sola
+            var lector = parent.querySelector('input[placeholder="oculto_scanner"]');
+            if (lector) {
+                lector.focus();
+            }
+        }
+        setInterval(enfocarLector, 500); // Revisa cada medio segundo
         </script>
     """, height=0)
     
