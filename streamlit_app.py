@@ -67,15 +67,6 @@ def modal_nuevo(cat):
             st.cache_data.clear() 
             st.rerun()
 
-@st.dialog("📲 Realizar Recarga")
-def modal_recarga():
-    op = st.selectbox("Operador", ["WOM", "ENTEL", "MOVISTAR", "CLARO"])
-    m = st.number_input("Monto ($)", min_value=0, step=500, value=None, placeholder="Ej: 2000")
-    if st.button("Agregar al Pedido"):
-        if m is not None and m > 0:
-            st.session_state.pedido_temporal.append({"categoria": "Recarga", "producto": f"Recarga {op}", "monto": int(m)})
-            st.rerun()
-
 @st.dialog("📦 Venta Especial")
 def modal_otros():
     desc = st.text_input("¿Qué se vendió?")
@@ -87,7 +78,6 @@ def modal_otros():
 
 @st.dialog("💸 Gasto")
 def modal_gastos():
-    # Obtener hora exacta actual
     ahora = datetime.now()
     hora_pantalla = ahora.strftime("%H:%M:%S (%d/%m/%Y)")
     st.info(f"🕒 **Hora actual:** {hora_pantalla}")
@@ -97,8 +87,6 @@ def modal_gastos():
     
     if st.button("Guardar Gasto"):
         if m is not None and m > 0:
-            # Guarda directo en Supabase (monto y descripción). 
-            # Supabase asignará la hora exacta en la columna 'created_at' automáticamente.
             supabase.table("gastos").insert({
                 "monto": int(m), 
                 "descripcion": d
@@ -154,10 +142,7 @@ with col_m:
     def mostrar_seccion(titulo, cat, especial=None):
         st.header(titulo)
         grid = st.columns(5)
-        if especial == "Recarga":
-            with grid[0]:
-                if st.button("📲\n\nRECARGAR", use_container_width=True): modal_recarga()
-        elif especial == "Otros":
+        if especial == "Otros":
             with grid[0]:
                 if st.button("📦\n\nVENTA ESPECIAL", use_container_width=True): modal_otros()
         else:
@@ -188,7 +173,6 @@ with col_m:
     
     mostrar_seccion("🥤 BEBESTIBLE", "Bebestible")
     mostrar_seccion("🏪 TIENDA", "Tienda")
-    mostrar_seccion("📲 RECARGA", "Recarga", especial="Recarga")
     mostrar_seccion("🍺 CHELA", "Chela")
     mostrar_seccion("📦 OTROS", "Otros", especial="Otros")
 
