@@ -8,12 +8,10 @@ import time
 
 # --- 🕒 FUNCIONES DE HORA CHILENA INTELIGENTE ---
 def obtener_hora_chile():
-    # Usa el huso horario oficial, detecta solo los cambios de verano/invierno
     return datetime.now(ZoneInfo("America/Santiago"))
 
 def formatear_hora_supabase(fecha_utc_str):
     try:
-        # Convierte la hora global de Supabase a la hora exacta de Chile
         dt = datetime.fromisoformat(fecha_utc_str.replace('Z', '+00:00'))
         dt_chile = dt.astimezone(ZoneInfo("America/Santiago"))
         return dt_chile.strftime("%H:%M hrs")
@@ -101,7 +99,7 @@ def modal_gastos():
         if m is not None and m > 0:
             supabase.table("gastos").insert({
                 "monto": int(m), 
-                "descripcion": d
+                "descripcion": d.strip()
             }).execute()
             st.success("Gasto guardado correctamente")
             st.rerun()
@@ -114,7 +112,7 @@ def modal_debo():
         desc = st.text_input("Descripción (Ej: Vuelto pendiente $1000)")
         if st.button("💾 Guardar Registro", type="primary"):
             if nom and desc:
-                datos = {"nombre": nom, "descripcion": desc}
+                datos = {"nombre": nom.strip(), "descripcion": desc.strip()}
                 if mon is not None and mon > 0:
                     datos["monto"] = int(mon)
                 supabase.table("debo").insert(datos).execute()
@@ -154,6 +152,7 @@ def modal_debo():
             st.markdown("---")
 
 def procesar_scanner():
+    # Limpiamos el texto que tira el escáner para evitar que metan espacios fantasmas
     codigo_leido = st.session_state.lector_codigo.strip()
     if codigo_leido:
         menu_actual = leer_menu_rapido() 
@@ -162,12 +161,13 @@ def procesar_scanner():
             producto_encontrado = menu_actual[menu_actual['codigo_str'] == codigo_leido]
             if not producto_encontrado.empty:
                 row = producto_encontrado.iloc[0]
+                # Agregamos al pedido también con .strip() para máxima seguridad
                 st.session_state.pedido_temporal.append({
-                    "categoria": row['categoria'], 
-                    "producto": row['producto'], 
+                    "categoria": str(row['categoria']).strip(), 
+                    "producto": str(row['producto']).strip(), 
                     "monto": row['monto']
                 })
-                st.session_state.msj_scanner = f"✅ {row['producto']} agregado."
+                st.session_state.msj_scanner = f"✅ {str(row['producto']).strip()} agregado."
             else:
                 st.session_state.msj_scanner = "❌ Producto no encontrado."
         else:
@@ -213,7 +213,11 @@ with col_m:
                             st.rerun()
                     p_f = f"${int(row['monto']):,}".replace(",", ".")
                     if st.button(f"{row['producto']}\n\n{p_f}", key=f"b_{row['id']}", use_container_width=True):
-                        st.session_state.pedido_temporal.append({"categoria": row['categoria'], "producto": row['producto'], "monto": row['monto']})
+                        st.session_state.pedido_temporal.append({
+                            "categoria": str(row['categoria']).strip(), 
+                            "producto": str(row['producto']).strip(), 
+                            "monto": row['monto']
+                        })
                         st.rerun()
             
             if st.session_state.modo_editor:
@@ -278,11 +282,14 @@ with col_p:
                 
                 # 1. Guardamos TODO individual en Supabase
                 for item in st.session_state.pedido_temporal:
-                    es_comida = item["categoria"] in ["Desayuno", "Almuerzo", "Cena"]
+                    # Garantizamos que la categoría no traiga espacios fantasmas del escáner
+                    cat_limpia = str(item.get("categoria", "")).strip()
+                    es_comida = cat_limpia in ["Desayuno", "Almuerzo", "Cena"]
+                    
                     ventas_to_insert.append({
                         "producto": item["producto"],
                         "monto": int(item["monto"]),
-                        "categoria": item["categoria"],
+                        "categoria": cat_limpia,
                         "tipo": "PAGADO",
                         "estado_impresion": "PENDIENTE" if es_comida else "N/A"
                     })
@@ -292,14 +299,13 @@ with col_p:
                 # 2. AGRUPAMOS solo para la impresión
                 conteo_comidas = {}
                 for item in st.session_state.pedido_temporal:
-                    if item["categoria"] in ["Desayuno", "Almuerzo", "Cena"]:
-                        prod = item["producto"]
-                        cat = item["categoria"]
-                        clave = (prod, cat)
+                    cat_limpia = str(item.get("categoria", "")).strip()
+                    if cat_limpia in ["Desayuno", "Almuerzo", "Cena"]:
+                        prod = str(item.get("producto", "")).strip()
+                        clave = (prod, cat_limpia)
                         conteo_comidas[clave] = conteo_comidas.get(clave, 0) + 1
 
                 html_tickets = ""
-                # Toma la hora exacta de Chile al momento de imprimir
                 fecha_ticket = obtener_hora_chile().strftime("%d/%m/%y, %H:%M")
                 
                 for (prod, cat), cantidad in conteo_comidas.items():
@@ -324,7 +330,9 @@ with col_p:
                     </div>
                     """.replace(",", ".")
                 
+                # LA ETIQUETA MAGICA UTF-8 PARA ELIMINAR LOS SIMBOLOS CHINOS
                 estilo = """
+                <meta charset="UTF-8">
                 <style>
                     @page { margin-top: 0.5cm; margin-bottom: 0cm; margin-left: 0.1cm; margin-right: 0.1cm; } 
                     body { margin: 0; padding: 0; }
