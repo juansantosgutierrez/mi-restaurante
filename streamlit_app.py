@@ -6,6 +6,7 @@ from zoneinfo import ZoneInfo
 import streamlit.components.v1 as components
 import time
 import re
+import uuid
 
 # --- 🕒 FUNCIONES DE HORA CHILENA ---
 def obtener_hora_chile():
@@ -19,15 +20,29 @@ def formatear_hora_supabase(fecha_utc_str):
     except:
         return fecha_utc_str
 
-# --- 🛡️ FILTRO DICTATORIAL (SOLO LETRAS Y NÚMEROS, NADA MÁS) ---
+# --- 🛡️ FILTRO DICTATORIAL (AHORA PERMITE EL SÍMBOLO '+' PARA LOS DESAYUNOS) ---
 def filtro_estricto(texto):
     if not texto: return ""
-    t = str(texto).upper() # Todo a mayúscula forzada
-    # Reemplazo manual de tildes y ñ
+    t = str(texto).upper()
     t = t.replace('Á','A').replace('É','E').replace('Í','I').replace('Ó','O').replace('Ú','U').replace('Ñ','N')
-    # DESTRUYE TODO lo que no sea una letra de la A-Z, número del 0-9 o espacio en blanco.
-    t_limpio = re.sub(r'[^A-Z0-9\s]', '', t)
+    # Permite letras, números, espacios y el signo '+'
+    t_limpio = re.sub(r'[^A-Z0-9\s+]', '', t)
     return t_limpio.strip()
+
+# --- ☕ FUNCIÓN INTELIGENTE PARA AGREGAR BEBIDA AL DESAYUNO ---
+def aplicar_bebida_desayuno(categoria, producto):
+    cat = filtro_estricto(categoria).upper()
+    prod = filtro_estricto(producto).upper()
+    
+    if cat == "DESAYUNO":
+        # Evitamos agregar bebida si el producto es un caldo o una bebida individual
+        excluir = ["CALDO", "CAFE", "TE", "MATE"]
+        if not any(x in prod for x in excluir):
+            # Leemos qué bebida está seleccionada en los botones rápidos
+            bebida_seleccionada = st.session_state.get("bebida_desayuno", "Ninguna")
+            if bebida_seleccionada != "Ninguna":
+                prod = f"{prod} + {filtro_estricto(bebida_seleccionada).upper()}"
+    return prod
 
 # 🎨 Configuración de pantalla
 st.set_page_config(page_title="Restaurante Santos", layout="wide")
@@ -154,12 +169,16 @@ def procesar_scanner():
             producto_encontrado = menu_actual[menu_actual['codigo_str'] == codigo_leido]
             if not producto_encontrado.empty:
                 row = producto_encontrado.iloc[0]
+                
+                # Pasa por el filtro inteligente de bebida
+                prod_final = aplicar_bebida_desayuno(row['categoria'], row['producto'])
+                
                 st.session_state.pedido_temporal.append({
                     "categoria": filtro_estricto(row['categoria']), 
-                    "producto": filtro_estricto(row['producto']), 
+                    "producto": prod_final, 
                     "monto": row['monto']
                 })
-                st.session_state.msj_scanner = f"✅ {filtro_estricto(row['producto'])} agregado."
+                st.session_state.msj_scanner = f"✅ {prod_final} agregado."
             else:
                 st.session_state.msj_scanner = "❌ Producto no encontrado."
         else:
@@ -196,7 +215,6 @@ with col_m:
                 if st.button("📦\n\nVENTA ESPECIAL", use_container_width=True): modal_otros()
         else:
             cat_limpia = filtro_estricto(cat)
-            # Filtramos comparando en mayusculas para no tener perdidas
             items = df_menu[df_menu["categoria"].apply(lambda x: filtro_estricto(str(x))) == cat_limpia]
             for i, (idx, row) in enumerate(items.iterrows()):
                 with grid[i % 5]:
@@ -206,10 +224,15 @@ with col_m:
                             st.cache_data.clear()
                             st.rerun()
                     p_f = f"${int(row['monto']):,}".replace(",", ".")
+                    
+                    # Botón del producto
                     if st.button(f"{row['producto']}\n\n{p_f}", key=f"b_{row['id']}", use_container_width=True):
+                        # Pasa por el filtro inteligente de bebida
+                        prod_final = aplicar_bebida_desayuno(row['categoria'], row['producto'])
+                        
                         st.session_state.pedido_temporal.append({
                             "categoria": filtro_estricto(row['categoria']), 
-                            "producto": filtro_estricto(row['producto']), 
+                            "producto": prod_final, 
                             "monto": row['monto']
                         })
                         st.rerun()
@@ -222,7 +245,10 @@ with col_m:
 
     with st.expander("🍔 COMIDA", expanded=True):
         t1, t2, t3 = st.tabs(["🍳 Desayuno", "🍲 Almuerzo", "🌙 Cena"])
-        with t1: mostrar_seccion("Desayuno", "Desayuno")
+        with t1: 
+            # === AQUÍ ESTÁ LA MAGIA PARA LAS BEBIDAS DEL DESAYUNO ===
+            st.radio("☕ Bebida incluida (Solo sándwiches/atún):", ["Ninguna", "Té", "Café", "Mate"], horizontal=True, key="bebida_desayuno")
+            mostrar_seccion("Desayuno", "Desayuno")
         with t2: mostrar_seccion("Almuerzo", "Almuerzo")
         with t3: mostrar_seccion("Cena", "Cena")
     
@@ -275,13 +301,13 @@ with col_p:
                 ventas_to_insert = []
                 
                 for item in st.session_state.pedido_temporal:
-                    cat_limpia = filtro_estricto(item.get("categoria", ""))
+                    cat_limpia = filtro_estricto(item.get("categoria", "")).upper()
                     es_comida = cat_limpia in ["DESAYUNO", "ALMUERZO", "CENA"]
                     
                     ventas_to_insert.append({
                         "producto": item["producto"],
                         "monto": int(item["monto"]),
-                        "categoria": cat_limpia,
+                        "categoria": item.get("categoria", ""),
                         "tipo": "PAGADO",
                         "estado_impresion": "PENDIENTE" if es_comida else "N/A"
                     })
@@ -290,10 +316,12 @@ with col_p:
                 
                 conteo_comidas = {}
                 for item in st.session_state.pedido_temporal:
-                    cat_limpia = filtro_estricto(item.get("categoria", ""))
-                    if cat_limpia in ["DESAYUNO", "ALMUERZO", "CENA"]:
-                        prod_limpio = filtro_estricto(item.get("producto", ""))
-                        clave = (prod_limpio, cat_limpia)
+                    cat_mayuscula = filtro_estricto(item.get("categoria", "")).upper()
+                    
+                    if cat_mayuscula in ["DESAYUNO", "ALMUERZO", "CENA"]:
+                        # El producto aquí ya viene con el "+ TE" si aplicaba
+                        prod_limpio = item.get("producto", "")
+                        clave = (prod_limpio, cat_mayuscula)
                         conteo_comidas[clave] = conteo_comidas.get(clave, 0) + 1
 
                 html_tickets = ""
@@ -301,7 +329,6 @@ with col_p:
                 if conteo_comidas:
                     fecha_ticket = obtener_hora_chile().strftime("%d/%m/%y %H:%M")
                     
-                    # HTML extremadamente simple para no llenar la RAM de la impresora
                     for (prod, cat), cantidad in conteo_comidas.items():
                         texto_cantidad = f"{cantidad}x " if cantidad > 1 else ""
                         html_tickets += f"""
@@ -311,6 +338,8 @@ with col_p:
                             <div style="font-size: 16px; margin-top: 5px;">({cat})</div>
                         </div>
                         """
+                    
+                    sello_invisible = f"<div id='{uuid.uuid4()}' style='display: none;'></div>"
                     
                     html_completo = f"""
                     <!DOCTYPE html>
@@ -323,6 +352,7 @@ with col_p:
                     </head>
                     <body onload="setTimeout(function(){{ window.print(); }}, 500);">
                         {html_tickets}
+                        {sello_invisible}
                     </body>
                     </html>
                     """
