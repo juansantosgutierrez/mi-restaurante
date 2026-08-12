@@ -51,11 +51,10 @@ def leer_menu_rapido():
     except: 
         return pd.DataFrame(columns=["id", "categoria", "producto", "monto", "codigo"])
 
-# --- MODALES (SIN EL CERO MOLESTO) ---
+# --- MODALES ---
 @st.dialog("➕ Nuevo Producto")
 def modal_nuevo(cat):
     n = st.text_input(f"Nombre del {cat}")
-    # value=None hace que empiece en blanco sin el 0
     p = st.number_input("Precio ($)", min_value=0, step=100, value=None, placeholder="Ej: 1500")
     c = st.text_input("Código de Barras (Opcional - Pistolea aquí)")
     
@@ -88,12 +87,17 @@ def modal_otros():
 
 @st.dialog("💸 Gasto")
 def modal_gastos():
+    # Muestra la hora exacta optimizada sin ralentizar la app
+    hora_actual = datetime.now().strftime("%d/%m/%Y a las %H:%M:%S")
+    st.info(f"🕒 **Hora de registro:** {hora_actual}")
+    
     m = st.number_input("Monto ($)", min_value=0, step=500, value=None, placeholder="Ej: 10000")
     d = st.text_input("Descripción")
-    o = st.selectbox("Saco De:", ["Comida", "Bebestible", "Tienda", "Recarga", "Chela", "Otros", "Caja General"])
+    
     if st.button("Guardar Gasto"):
         if m is not None and m > 0:
-            supabase.table("gastos").insert({"monto": int(m), "descripcion": d, "origen": o}).execute()
+            # Eliminamos el "Saco de" para hacerlo más rápido
+            supabase.table("gastos").insert({"monto": int(m), "descripcion": d}).execute()
             st.success("Gasto guardado")
             st.rerun()
 
@@ -101,7 +105,7 @@ def modal_gastos():
 def procesar_scanner():
     codigo_leido = st.session_state.lector_codigo.strip()
     if codigo_leido:
-        menu_actual = leer_menu_rapido() # Trae los datos frescos
+        menu_actual = leer_menu_rapido() 
         if "codigo" in menu_actual.columns:
             menu_actual['codigo_str'] = menu_actual['codigo'].fillna('').astype(str).str.strip()
             producto_encontrado = menu_actual[menu_actual['codigo_str'] == codigo_leido]
@@ -119,7 +123,6 @@ def procesar_scanner():
         else:
             st.session_state.msj_scanner = "⚠️ Falta la columna 'codigo'."
             
-    # Limpia la caja oculta automáticamente
     st.session_state.lector_codigo = ""
 
 # --- CARGAR DATOS ---
@@ -186,30 +189,27 @@ with col_m:
 
 # COLUMNA DERECHA: CARRITO Y ESCÁNER INVISIBLE
 with col_p:
-    # 🔫 ESCÁNER 100% INVISIBLE: Escucha en el fondo todo el tiempo
+    # 🔫 ESCÁNER 100% INVISIBLE
     st.text_input("Lector Oculto", key="lector_codigo", on_change=procesar_scanner, placeholder="oculto_scanner", label_visibility="collapsed")
     
-    # Este script JavaScript hace que siempre esté listo para pistolear, sin hacer clic
     components.html("""
         <script>
         function enfocarLector() {
             var parent = window.parent.document;
             var activo = parent.activeElement;
             
-            // Si estás agregando un menú o escribiendo el precio, deja el teclado en paz
             if (activo && (activo.tagName === 'INPUT' || activo.tagName === 'TEXTAREA')) {
                 if (activo.placeholder !== "oculto_scanner") {
                     return; 
                 }
             }
             
-            // Si no estás haciendo nada, la pistola queda activa sola
             var lector = parent.querySelector('input[placeholder="oculto_scanner"]');
             if (lector) {
                 lector.focus();
             }
         }
-        setInterval(enfocarLector, 500); // Revisa cada medio segundo
+        setInterval(enfocarLector, 500);
         </script>
     """, height=0)
     
