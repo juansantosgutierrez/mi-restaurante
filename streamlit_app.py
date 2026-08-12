@@ -4,7 +4,6 @@ import pandas as pd
 from datetime import datetime
 from zoneinfo import ZoneInfo
 import streamlit.components.v1 as components
-import time
 import re
 import uuid
 
@@ -64,12 +63,15 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
+# --- VARIABLES DE MEMORIA ---
 if 'pedido_temporal' not in st.session_state:
     st.session_state.pedido_temporal = []
 if 'modo_editor' not in st.session_state:
     st.session_state.modo_editor = False
 if 'msj_scanner' not in st.session_state:
     st.session_state.msj_scanner = ""
+if 'ticket_imprimir' not in st.session_state:
+    st.session_state.ticket_imprimir = ""
 
 @st.cache_data(ttl=2)
 def leer_menu_rapido():
@@ -324,11 +326,9 @@ with col_p:
                     for (prod, cat), cantidad in conteo_comidas.items():
                         texto_cantidad = f"{cantidad}x " if cantidad > 1 else ""
                         
-                        # --- DISEÑO: Separar comida de bebida si hay un signo "+" ---
                         if " + " in prod:
                             partes = prod.split(" + ")
                             comida_principal = partes[0]
-                            # Bebida más chica (20px) debajo de la comida (28px)
                             bebida_agregada = f"<div style='font-size: 20px; font-weight: bold; margin-top: 2px; color: #000;'>+ {partes[1]}</div>"
                         else:
                             comida_principal = prod
@@ -353,6 +353,7 @@ with col_p:
                     <!DOCTYPE html>
                     <html>
                     <head>
+                        <meta charset="UTF-8">
                         <style>
                             @page {{ margin: 0; }} 
                             body {{ margin: 0; padding: 0; font-family: Arial, sans-serif; }}
@@ -364,9 +365,8 @@ with col_p:
                     </body>
                     </html>
                     """
-                    components.html(html_completo, height=0)
-                    st.success("✅ Venta de comida registrada e impresión enviada a cocina.")
-                    time.sleep(2) 
+                    # SE GUARDA EL TICKET EN MEMORIA Y SE BORRA EL CARRITO
+                    st.session_state.ticket_imprimir = html_completo
                 else:
                     st.success("✅ Venta de bebidas registrada. (Ignoradas en impresión).")
 
@@ -374,3 +374,10 @@ with col_p:
                 st.rerun()
             except Exception as e:
                 st.error(f"Error al guardar: {e}")
+
+    # --- ZONA SEGURA DE IMPRESIÓN (SIN LÍMITE DE TIEMPO) ---
+    if st.session_state.get("ticket_imprimir"):
+        components.html(st.session_state.ticket_imprimir, height=0)
+        st.success("✅ Venta registrada e impresión enviada a cocina.")
+        # Se vacía para que no se imprima doble, pero el componente HTML ya quedó cargado en el navegador de forma segura
+        st.session_state.ticket_imprimir = ""
