@@ -186,10 +186,11 @@ def modal_debo():
             with c1:
                 st.markdown(f"**👤 {item['nombre']}**")
                 detalles = []
+                # El \ antes del signo $ bloquea el color verde matemático
                 if item.get('monto'):
-                    detalles.append(f"Me dio: ${int(item['monto']):,}".replace(",", "."))
+                    detalles.append(f"Me dio: \${int(item['monto']):,}".replace(",", "."))
                 if item.get('monto_devolver'):
-                    detalles.append(f"Debo entregar: ${int(item['monto_devolver']):,}".replace(",", "."))
+                    detalles.append(f"Debo entregar: \${int(item['monto_devolver']):,}".replace(",", "."))
                 
                 if detalles:
                     st.write(" | ".join(detalles))
@@ -220,11 +221,12 @@ def procesar_scanner():
                     "producto": prod_final, 
                     "monto": row['monto']
                 })
-                st.session_state.msj_scanner = f"✅ {prod_final} agregado."
+                # Notificación rápida de 3 segundos al escanear
+                st.toast(f"✅ {prod_final} agregado.")
             else:
-                st.session_state.msj_scanner = "❌ Producto no encontrado."
+                st.toast("❌ Producto no encontrado.", icon="❌")
         else:
-            st.session_state.msj_scanner = "⚠️ Falta la columna 'codigo'."
+            st.toast("⚠️ Falta la columna 'codigo'.", icon="⚠️")
     st.session_state.lector_codigo = ""
 
 # --- CARGAR DATOS ---
@@ -315,11 +317,6 @@ with col_p:
         setInterval(enfocarLector, 500);
         </script>
     """, height=0)
-    
-    if st.session_state.msj_scanner:
-        if "✅" in st.session_state.msj_scanner: st.success(st.session_state.msj_scanner)
-        else: st.error(st.session_state.msj_scanner)
-        st.session_state.msj_scanner = ""
 
     st.subheader("📝 Pedido Actual")
     total = sum(int(i["monto"]) for i in st.session_state.pedido_temporal)
@@ -333,7 +330,8 @@ with col_p:
             st.rerun()
             
     st.divider()
-    st.markdown(f"## TOTAL: ${total:,}".replace(",", "."))
+    # Se añade \ para que el total tampoco falle a futuro
+    st.markdown(f"## TOTAL: \${total:,}".replace(",", "."))
     
     if st.button("✅ FINALIZAR VENTA", type="primary", use_container_width=True):
         if st.session_state.pedido_temporal:
@@ -421,5 +419,6 @@ with col_p:
     # --- ZONA SEGURA DE IMPRESIÓN ---
     if st.session_state.get("ticket_imprimir"):
         components.html(st.session_state.ticket_imprimir, height=0)
-        st.success("✅ Venta registrada (Gaveta abriendo...).")
+        # Aquí está la notificación rápida de 3 segundos en vez del cuadro verde gigante
+        st.toast("Venta registrada (Abriendo Gaveta...)", icon="✅")
         st.session_state.ticket_imprimir = ""
