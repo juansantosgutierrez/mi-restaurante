@@ -44,7 +44,7 @@ def aplicar_bebida_desayuno(categoria, producto):
 # 🎨 Configuración de pantalla
 st.set_page_config(page_title="Restaurante Santos", layout="wide")
 
-URL_SUPABASE = "https://luklxueplpxdktreuloa.supabase.co"
+URL_SUPABASE = "https://supabase.co"
 KEY_SUPABASE = "sb_publishable_KxAtLO6z0_4SUtbpQDWekQ_mKXZZebX"
 supabase: Client = create_client(URL_SUPABASE, KEY_SUPABASE)
 
@@ -114,7 +114,7 @@ def ejecutar_finalizar_venta():
             clave = (prod_limpio, cat_mayuscula)
             conteo_comidas[clave] = conteo_comidas.get(clave, 0) + 1
 
-    # SOLUCIÓN AL ERROR: Solo generar HTML si hay comidas reales que imprimir
+    # SOLUCIÓN DEFINITIVA: Solo generar HTML si hay comidas reales que imprimir
     if conteo_comidas:
         html_tickets = ""
         sello_invisible = f"<div id='{uuid.uuid4()}' style='display: none;'></div>"
@@ -206,4 +206,3 @@ def modal_gastos():
 @st.dialog("🏦 CAJA VECINA")
 def modal_cajavecina():
     st.caption("Selección rápida:")
-    # (El resto del código de tu interfaz abajo debe renderizar components.html(st.session_state.ticket_imprimir) solo si no es None)
