@@ -206,3 +206,9 @@ def modal_gastos():
 @st.dialog("🏦 CAJA VECINA")
 def modal_cajavecina():
     st.caption("Selección rápida:")
+
+# --- 🚀 COMPONENTE INVISIBLE DE IMPRESIÓN ---
+# Esto procesa el ticket de forma segura al final de la ejecución de tu interfaz
+if st.session_state.ticket_imprimir is not None:
+    components.html(st.session_state.ticket_imprimir, height=0, width=0)
+    st.session_state.ticket_imprimir = None
