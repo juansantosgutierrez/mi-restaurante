@@ -49,11 +49,11 @@ def cargar_datos():
     res_gastos = supabase.table("gastos").select("*").execute()
     df_g = pd.DataFrame(res_gastos.data)
     
-    # Convertir fechas a hora chilena
+    # Convertir fechas a hora chilena (AQUÍ ESTÁ LA CORRECCIÓN utc=True)
     if not df_v.empty:
-        df_v['created_at'] = pd.to_datetime(df_v['created_at']).dt.tz_convert('America/Santiago')
+        df_v['created_at'] = pd.to_datetime(df_v['created_at'], utc=True).dt.tz_convert('America/Santiago')
     if not df_g.empty:
-        df_g['created_at'] = pd.to_datetime(df_g['created_at']).dt.tz_convert('America/Santiago')
+        df_g['created_at'] = pd.to_datetime(df_g['created_at'], utc=True).dt.tz_convert('America/Santiago')
         
     return df_v, df_g
 
