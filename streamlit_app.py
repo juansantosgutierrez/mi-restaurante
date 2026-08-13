@@ -4,6 +4,7 @@ import pandas as pd
 from datetime import datetime
 from zoneinfo import ZoneInfo
 import streamlit.components.v1 as components
+import time
 import re
 import uuid
 
@@ -63,15 +64,12 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# --- VARIABLES DE MEMORIA ---
 if 'pedido_temporal' not in st.session_state:
     st.session_state.pedido_temporal = []
 if 'modo_editor' not in st.session_state:
     st.session_state.modo_editor = False
 if 'msj_scanner' not in st.session_state:
     st.session_state.msj_scanner = ""
-if 'ticket_imprimir' not in st.session_state:
-    st.session_state.ticket_imprimir = ""
 
 @st.cache_data(ttl=2)
 def leer_menu_rapido():
@@ -116,16 +114,48 @@ def modal_gastos():
             st.success("Gasto guardado correctamente")
             st.rerun()
 
+# --- NUEVO MODAL: CAJA VECINA ---
+@st.dialog("🏦 CAJA VECINA")
+def modal_cajavecina():
+    st.write("Selecciona el monto cobrado:")
+    opcion = st.radio("Monto rápido:", ["$1.000", "$2.000", "$3.000", "$4.000", "$5.000", "Otro monto"], horizontal=True, label_visibility="collapsed")
+    
+    monto_final = 0
+    if opcion == "Otro monto":
+        monto_custom = st.number_input("Ingresa el monto exacto ($)", min_value=0, step=1000, value=None)
+        if monto_custom:
+            monto_final = int(monto_custom)
+    else:
+        monto_final = int(opcion.replace("$", "").replace(".", ""))
+        
+    if st.button("✅ Registrar en Caja", type="primary", use_container_width=True):
+        if monto_final > 0:
+            st.session_state.pedido_temporal.append({
+                "categoria": "CAJA VECINA", 
+                "producto": "CAJA VECINA", 
+                "monto": monto_final
+            })
+            st.rerun()
+
+# --- MODAL DEBO ACTUALIZADO ---
 @st.dialog("🤝 Registro DEBO / Vueltos Pendientes", width="large")
 def modal_debo():
     with st.expander("➕ Agregar Nuevo Registro", expanded=False):
         nom = st.text_input("Nombre de la persona")
-        mon = st.number_input("Monto ($)", min_value=0, step=100, value=None, placeholder="Ej: 2000 (Opcional)", key="debo_monto")
-        desc = st.text_input("Descripción (Ej: Vuelto pendiente $1000)")
+        c1, c2 = st.columns(2)
+        with c1:
+            mon_recibido = st.number_input("Monto que me dio ($)", min_value=0, step=100, value=None, placeholder="Ej: 5000")
+        with c2:
+            mon_devolver = st.number_input("Debo entregar: ($)", min_value=0, step=100, value=None, placeholder="Ej: 3000")
+            
+        desc = st.text_input("Descripción (Ej: Falta vuelto o Motivo)")
+        
         if st.button("💾 Guardar Registro", type="primary"):
             if nom and desc:
                 datos = {"nombre": filtro_estricto(nom), "descripcion": filtro_estricto(desc)}
-                if mon is not None and mon > 0: datos["monto"] = int(mon)
+                if mon_recibido is not None: datos["monto"] = int(mon_recibido)
+                if mon_devolver is not None: datos["monto_devolver"] = int(mon_devolver)
+                
                 supabase.table("debo").insert(datos).execute()
                 st.rerun() 
             else:
@@ -147,14 +177,15 @@ def modal_debo():
         for item in registros:
             c1, c2, c3 = st.columns([5, 2, 2])
             with c1:
-                monto_str = f" (${int(item['monto']):,})".replace(",", ".") if item.get('monto') else ""
-                st.markdown(f"**👤 {item['nombre']}**{monto_str}")
+                t_dio = f" | Me dio: ${int(item['monto']):,}".replace(",", ".") if item.get('monto') else ""
+                t_deb = f" | **DEBO DAR: ${int(item['monto_devolver']):,}**".replace(",", ".") if item.get('monto_devolver') else ""
+                st.markdown(f"**👤 {item['nombre']}** {t_dio} {t_deb}")
                 st.caption(f"📝 {item.get('descripcion', '')}")
             with c2:
                 hora_bonita = formatear_hora_supabase(item.get('created_at', ''))
                 st.caption(f"🕒 {hora_bonita}")
             with c3:
-                if st.button("↩️ Devolver", key=f"dev_{item['id']}"):
+                if st.button("↩️ Devolver / Saldado", key=f"dev_{item['id']}"):
                     supabase.table("debo").delete().eq("id", item['id']).execute()
                     st.rerun()
             st.markdown("---")
@@ -187,17 +218,18 @@ def procesar_scanner():
 df_menu = leer_menu_rapido()
 
 # --- INTERFAZ PRINCIPAL ---
-c1, c2, c3, c4 = st.columns([2, 1, 1, 1])
+c1, c2, c3, c4, c5 = st.columns([2, 1, 1, 1, 1])
 c1.title("🍴 Restaurante Santos")
 if c2.button("💸 GASTOS", use_container_width=True): modal_gastos()
 if c3.button("🤝 DEBO", use_container_width=True): modal_debo()
+if c4.button("🏦 CAJA VECINA", use_container_width=True): modal_cajavecina()
 
 if c1.button("🔄 Sincronizar Datos"):
     st.cache_data.clear()
     st.rerun()
 
-txt_btn = "🔄 CERRAR EDITOR" if st.session_state.modo_editor else "➕ AGREGAR MENU HOY"
-if c4.button(txt_btn, use_container_width=True):
+txt_btn = "🔄 CERRAR EDITOR" if st.session_state.modo_editor else "➕ MENÚ HOY"
+if c5.button(txt_btn, use_container_width=True):
     st.session_state.modo_editor = not st.session_state.modo_editor
     st.rerun()
 
@@ -319,6 +351,7 @@ with col_p:
                         conteo_comidas[clave] = conteo_comidas.get(clave, 0) + 1
 
                 html_tickets = ""
+                sello_invisible = f"<div id='{uuid.uuid4()}' style='display: none;'></div>"
                 
                 if conteo_comidas:
                     fecha_ticket = obtener_hora_chile().strftime("%d/%m/%y, %H:%M")
@@ -346,38 +379,36 @@ with col_p:
                             </div>
                         </div>
                         """
-                    
-                    sello_invisible = f"<div id='{uuid.uuid4()}' style='display: none;'></div>"
-                    
-                    html_completo = f"""
-                    <!DOCTYPE html>
-                    <html>
-                    <head>
-                        <meta charset="UTF-8">
-                        <style>
-                            @page {{ margin: 0; }} 
-                            body {{ margin: 0; padding: 0; font-family: Arial, sans-serif; }}
-                        </style>
-                    </head>
-                    <body onload="setTimeout(function(){{ window.print(); }}, 500);">
-                        {html_tickets}
-                        {sello_invisible}
-                    </body>
-                    </html>
-                    """
-                    # SE GUARDA EL TICKET EN MEMORIA Y SE BORRA EL CARRITO
-                    st.session_state.ticket_imprimir = html_completo
                 else:
-                    st.success("✅ Venta de bebidas registrada. (Ignoradas en impresión).")
+                    # TICKET FANTASMA PARA QUE LA GAVETA SALTE SI SOLO SON BEBIDAS O CAJA VECINA
+                    html_tickets = "<div style='font-size: 1px; color: white;'>.</div>"
+                
+                # LA ORDEN DE IMPRESIÓN SE ENVÍA SIEMPRE
+                html_completo = f"""
+                <!DOCTYPE html>
+                <html>
+                <head>
+                    <meta charset="UTF-8">
+                    <style>
+                        @page {{ margin: 0; }} 
+                        body {{ margin: 0; padding: 0; font-family: Arial, sans-serif; }}
+                    </style>
+                </head>
+                <body onload="setTimeout(function(){{ window.print(); }}, 500);">
+                    {html_tickets}
+                    {sello_invisible}
+                </body>
+                </html>
+                """
+                st.session_state.ticket_imprimir = html_completo
 
                 st.session_state.pedido_temporal = []
                 st.rerun()
             except Exception as e:
                 st.error(f"Error al guardar: {e}")
 
-    # --- ZONA SEGURA DE IMPRESIÓN (SIN LÍMITE DE TIEMPO) ---
+    # --- ZONA SEGURA DE IMPRESIÓN ---
     if st.session_state.get("ticket_imprimir"):
         components.html(st.session_state.ticket_imprimir, height=0)
-        st.success("✅ Venta registrada e impresión enviada a cocina.")
-        # Se vacía para que no se imprima doble, pero el componente HTML ya quedó cargado en el navegador de forma segura
+        st.success("✅ Venta registrada (Gaveta abriendo...).")
         st.session_state.ticket_imprimir = ""
