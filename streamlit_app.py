@@ -80,6 +80,85 @@ def leer_menu_rapido():
     except: 
         return pd.DataFrame(columns=["id", "categoria", "producto", "monto", "codigo"])
 
+# --- FUNCION MAESTRA PARA COBRAR E IMPRIMIR ---
+def ejecutar_finalizar_venta():
+    ventas_to_insert = []
+    
+    for item in st.session_state.pedido_temporal:
+        cat_limpia = filtro_estricto(item.get("categoria", "")).upper()
+        es_comida = cat_limpia in ["DESAYUNO", "ALMUERZO", "CENA"]
+        
+        ventas_to_insert.append({
+            "producto": item["producto"],
+            "monto": int(item["monto"]),
+            "categoria": item.get("categoria", ""),
+            "tipo": "PAGADO",
+            "estado_impresion": "PENDIENTE" if es_comida else "N/A"
+        })
+
+    supabase.table("ventas").insert(ventas_to_insert).execute()
+    
+    conteo_comidas = {}
+    for item in st.session_state.pedido_temporal:
+        cat_mayuscula = filtro_estricto(item.get("categoria", "")).upper()
+        
+        if cat_mayuscula in ["DESAYUNO", "ALMUERZO", "CENA"]:
+            prod_limpio = item.get("producto", "")
+            clave = (prod_limpio, cat_mayuscula)
+            conteo_comidas[clave] = conteo_comidas.get(clave, 0) + 1
+
+    html_tickets = ""
+    sello_invisible = f"<div id='{uuid.uuid4()}' style='display: none;'></div>"
+    
+    if conteo_comidas:
+        fecha_ticket = obtener_hora_chile().strftime("%d/%m/%y, %H:%M")
+        
+        for (prod, cat), cantidad in conteo_comidas.items():
+            texto_cantidad = f"{cantidad}x " if cantidad > 1 else ""
+            
+            if " + " in prod:
+                partes = prod.split(" + ")
+                comida_principal = partes[0]
+                bebida_agregada = f"<div style='font-size: 20px; font-weight: bold; margin-top: 2px; color: #000;'>+ {partes[1]}</div>"
+            else:
+                comida_principal = prod
+                bebida_agregada = ""
+
+            html_tickets += f"""
+            <div style="page-break-after: always; text-align: left; width: 100%; font-family: 'Arial', sans-serif; padding: 0; margin: 0;">
+                <p style="font-size: 12px; margin: 0; color: #000;">{fecha_ticket}</p>
+                <p style="font-size: 12px; margin: 0; margin-bottom: 15px; color: #000;">Restaurante Santos</p>
+                
+                <div style="text-align: center; margin-top: 10px;">
+                    <h1 style="font-size: 28px; margin: 0; font-weight: bold; text-transform: uppercase; line-height: 1.1;">{texto_cantidad}{comida_principal}</h1>
+                    {bebida_agregada}
+                    <p style="font-size: 14px; margin: 5px 0 20px 0; text-transform: uppercase; color: #000;">({cat})</p>
+                </div>
+            </div>
+            """
+    else:
+        html_tickets = "<div style='font-size: 1px; color: white;'>.</div>"
+    
+    html_completo = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset="UTF-8">
+        <style>
+            @page {{ margin: 0; }} 
+            body {{ margin: 0; padding: 0; font-family: Arial, sans-serif; }}
+        </style>
+    </head>
+    <body onload="setTimeout(function(){{ window.print(); }}, 500);">
+        {html_tickets}
+        {sello_invisible}
+    </body>
+    </html>
+    """
+    st.session_state.ticket_imprimir = html_completo
+    st.session_state.pedido_temporal = []
+
+
 @st.dialog("➕ Nuevo Producto")
 def modal_nuevo(cat):
     n = st.text_input(f"Nombre del {cat}")
@@ -114,7 +193,6 @@ def modal_gastos():
             st.success("Gasto guardado correctamente")
             st.rerun()
 
-# --- MODAL CAJA VECINA CON BOTONES GRANDES ---
 @st.dialog("🏦 CAJA VECINA")
 def modal_cajavecina():
     st.caption("Selección rápida:")
@@ -144,8 +222,8 @@ def modal_cajavecina():
             st.session_state.pedido_temporal.append({"categoria": "CAJA VECINA", "producto": "CAJA VECINA", "monto": int(monto_custom)})
             st.rerun()
 
-# --- MODAL DEBO LIMPIO ---
-@st.dialog("🤝 Registro DEBO / Vueltos Pendientes", width="large")
+# --- ESTE ES EL BOTON GENERICO DE DEBO (Por si sacas fiado, sin vender nada) ---
+@st.dialog("🤝 Registro DEBO Manual", width="large")
 def modal_debo():
     with st.expander("➕ Agregar Nuevo Registro", expanded=False):
         nom = st.text_input("Nombre de la persona")
@@ -186,7 +264,6 @@ def modal_debo():
             with c1:
                 st.markdown(f"**👤 {item['nombre']}**")
                 detalles = []
-                # El \ antes del signo $ bloquea el color verde matemático
                 if item.get('monto'):
                     detalles.append(f"Me dio: \${int(item['monto']):,}".replace(",", "."))
                 if item.get('monto_devolver'):
@@ -203,6 +280,37 @@ def modal_debo():
                     supabase.table("debo").delete().eq("id", item['id']).execute()
                     st.rerun()
             st.markdown("---")
+
+# --- NUEVO MODAL: FINALIZAR VENTA DEJANDO VUELTO PENDIENTE ---
+@st.dialog("🤝 Vender y Dejar Vuelto Pendiente")
+def modal_venta_debo(total_venta):
+    st.markdown(f"### Total del pedido: **${total_venta:,}**".replace(",", "."))
+    nom = st.text_input("Nombre del cliente (A quien le debo)")
+    mon_recibido = st.number_input("Monto en billete que me dio ($)", min_value=total_venta, step=1000, value=total_venta)
+    
+    debo_entregar = mon_recibido - total_venta
+    st.info(f"**Vuelto que quedo debiendo:** ${debo_entregar:,}".replace(",", "."))
+    
+    if st.button("✅ Confirmar Venta y Guardar DEBO", type="primary", use_container_width=True):
+        if nom and debo_entregar > 0:
+            try:
+                # 1. Guardar en DEBO automáticamente
+                supabase.table("debo").insert({
+                    "nombre": filtro_estricto(nom),
+                    "descripcion": f"Vuelto pendiente de compra",
+                    "monto": int(mon_recibido),
+                    "monto_devolver": int(debo_entregar)
+                }).execute()
+                
+                # 2. Guardar venta real e Imprimir el ticket a cocina
+                ejecutar_finalizar_venta()
+                st.rerun()
+            except Exception as e:
+                st.error(f"Error: {e}")
+        elif debo_entregar <= 0:
+            st.warning("El vuelto es cero. Cierra esta ventana y usa el botón de Venta Exacta.")
+        else:
+            st.error("Falta anotar el nombre del cliente.")
 
 def procesar_scanner():
     codigo_leido = filtro_estricto(st.session_state.lector_codigo)
@@ -221,7 +329,6 @@ def procesar_scanner():
                     "producto": prod_final, 
                     "monto": row['monto']
                 })
-                # Notificación rápida de 3 segundos al escanear
                 st.toast(f"✅ {prod_final} agregado.")
             else:
                 st.toast("❌ Producto no encontrado.", icon="❌")
@@ -330,95 +437,27 @@ with col_p:
             st.rerun()
             
     st.divider()
-    # Se añade \ para que el total tampoco falle a futuro
     st.markdown(f"## TOTAL: \${total:,}".replace(",", "."))
     
-    if st.button("✅ FINALIZAR VENTA", type="primary", use_container_width=True):
-        if st.session_state.pedido_temporal:
-            try:
-                ventas_to_insert = []
-                
-                for item in st.session_state.pedido_temporal:
-                    cat_limpia = filtro_estricto(item.get("categoria", "")).upper()
-                    es_comida = cat_limpia in ["DESAYUNO", "ALMUERZO", "CENA"]
+    # --- LOS DOS BOTONES DE COBRO MAGICO ---
+    if st.session_state.pedido_temporal:
+        st.write("¿Cómo paga el cliente?")
+        col_f1, col_f2 = st.columns(2)
+        
+        with col_f1:
+            if st.button("✅ PAGO EXACTO", type="primary", use_container_width=True):
+                try:
+                    ejecutar_finalizar_venta()
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Error al guardar: {e}")
                     
-                    ventas_to_insert.append({
-                        "producto": item["producto"],
-                        "monto": int(item["monto"]),
-                        "categoria": item.get("categoria", ""),
-                        "tipo": "PAGADO",
-                        "estado_impresion": "PENDIENTE" if es_comida else "N/A"
-                    })
-
-                supabase.table("ventas").insert(ventas_to_insert).execute()
-                
-                conteo_comidas = {}
-                for item in st.session_state.pedido_temporal:
-                    cat_mayuscula = filtro_estricto(item.get("categoria", "")).upper()
-                    
-                    if cat_mayuscula in ["DESAYUNO", "ALMUERZO", "CENA"]:
-                        prod_limpio = item.get("producto", "")
-                        clave = (prod_limpio, cat_mayuscula)
-                        conteo_comidas[clave] = conteo_comidas.get(clave, 0) + 1
-
-                html_tickets = ""
-                sello_invisible = f"<div id='{uuid.uuid4()}' style='display: none;'></div>"
-                
-                if conteo_comidas:
-                    fecha_ticket = obtener_hora_chile().strftime("%d/%m/%y, %H:%M")
-                    
-                    for (prod, cat), cantidad in conteo_comidas.items():
-                        texto_cantidad = f"{cantidad}x " if cantidad > 1 else ""
-                        
-                        if " + " in prod:
-                            partes = prod.split(" + ")
-                            comida_principal = partes[0]
-                            bebida_agregada = f"<div style='font-size: 20px; font-weight: bold; margin-top: 2px; color: #000;'>+ {partes[1]}</div>"
-                        else:
-                            comida_principal = prod
-                            bebida_agregada = ""
-
-                        html_tickets += f"""
-                        <div style="page-break-after: always; text-align: left; width: 100%; font-family: 'Arial', sans-serif; padding: 0; margin: 0;">
-                            <p style="font-size: 12px; margin: 0; color: #000;">{fecha_ticket}</p>
-                            <p style="font-size: 12px; margin: 0; margin-bottom: 15px; color: #000;">Restaurante Santos</p>
-                            
-                            <div style="text-align: center; margin-top: 10px;">
-                                <h1 style="font-size: 28px; margin: 0; font-weight: bold; text-transform: uppercase; line-height: 1.1;">{texto_cantidad}{comida_principal}</h1>
-                                {bebida_agregada}
-                                <p style="font-size: 14px; margin: 5px 0 20px 0; text-transform: uppercase; color: #000;">({cat})</p>
-                            </div>
-                        </div>
-                        """
-                else:
-                    html_tickets = "<div style='font-size: 1px; color: white;'>.</div>"
-                
-                html_completo = f"""
-                <!DOCTYPE html>
-                <html>
-                <head>
-                    <meta charset="UTF-8">
-                    <style>
-                        @page {{ margin: 0; }} 
-                        body {{ margin: 0; padding: 0; font-family: Arial, sans-serif; }}
-                    </style>
-                </head>
-                <body onload="setTimeout(function(){{ window.print(); }}, 500);">
-                    {html_tickets}
-                    {sello_invisible}
-                </body>
-                </html>
-                """
-                st.session_state.ticket_imprimir = html_completo
-
-                st.session_state.pedido_temporal = []
-                st.rerun()
-            except Exception as e:
-                st.error(f"Error al guardar: {e}")
+        with col_f2:
+            if st.button("🤝 VUELTO PENDIENTE", use_container_width=True):
+                modal_venta_debo(total)
 
     # --- ZONA SEGURA DE IMPRESIÓN ---
     if st.session_state.get("ticket_imprimir"):
         components.html(st.session_state.ticket_imprimir, height=0)
-        # Aquí está la notificación rápida de 3 segundos en vez del cuadro verde gigante
         st.toast("Venta registrada (Abriendo Gaveta...)", icon="✅")
         st.session_state.ticket_imprimir = ""
