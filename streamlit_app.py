@@ -114,30 +114,37 @@ def modal_gastos():
             st.success("Gasto guardado correctamente")
             st.rerun()
 
-# --- NUEVO MODAL: CAJA VECINA ---
+# --- MODAL CAJA VECINA CON BOTONES GRANDES ---
 @st.dialog("🏦 CAJA VECINA")
 def modal_cajavecina():
-    st.write("Selecciona el monto cobrado:")
-    opcion = st.radio("Monto rápido:", ["$1.000", "$2.000", "$3.000", "$4.000", "$5.000", "Otro monto"], horizontal=True, label_visibility="collapsed")
-    
-    monto_final = 0
-    if opcion == "Otro monto":
-        monto_custom = st.number_input("Ingresa el monto exacto ($)", min_value=0, step=1000, value=None)
-        if monto_custom:
-            monto_final = int(monto_custom)
-    else:
-        monto_final = int(opcion.replace("$", "").replace(".", ""))
-        
-    if st.button("✅ Registrar en Caja", type="primary", use_container_width=True):
-        if monto_final > 0:
-            st.session_state.pedido_temporal.append({
-                "categoria": "CAJA VECINA", 
-                "producto": "CAJA VECINA", 
-                "monto": monto_final
-            })
+    st.caption("Selección rápida:")
+    c1, c2, c3 = st.columns(3)
+    if c1.button("$1.000", use_container_width=True):
+        st.session_state.pedido_temporal.append({"categoria": "CAJA VECINA", "producto": "CAJA VECINA", "monto": 1000})
+        st.rerun()
+    if c2.button("$2.000", use_container_width=True):
+        st.session_state.pedido_temporal.append({"categoria": "CAJA VECINA", "producto": "CAJA VECINA", "monto": 2000})
+        st.rerun()
+    if c3.button("$3.000", use_container_width=True):
+        st.session_state.pedido_temporal.append({"categoria": "CAJA VECINA", "producto": "CAJA VECINA", "monto": 3000})
+        st.rerun()
+
+    c4, c5 = st.columns(2)
+    if c4.button("$4.000", use_container_width=True):
+        st.session_state.pedido_temporal.append({"categoria": "CAJA VECINA", "producto": "CAJA VECINA", "monto": 4000})
+        st.rerun()
+    if c5.button("$5.000", use_container_width=True):
+        st.session_state.pedido_temporal.append({"categoria": "CAJA VECINA", "producto": "CAJA VECINA", "monto": 5000})
+        st.rerun()
+
+    st.divider()
+    monto_custom = st.number_input("Otro monto ($):", min_value=0, step=500, value=None, placeholder="Ej: 7500")
+    if st.button("✅ Agregar otro monto", type="primary", use_container_width=True):
+        if monto_custom is not None and monto_custom > 0:
+            st.session_state.pedido_temporal.append({"categoria": "CAJA VECINA", "producto": "CAJA VECINA", "monto": int(monto_custom)})
             st.rerun()
 
-# --- MODAL DEBO ACTUALIZADO ---
+# --- MODAL DEBO LIMPIO ---
 @st.dialog("🤝 Registro DEBO / Vueltos Pendientes", width="large")
 def modal_debo():
     with st.expander("➕ Agregar Nuevo Registro", expanded=False):
@@ -146,7 +153,7 @@ def modal_debo():
         with c1:
             mon_recibido = st.number_input("Monto que me dio ($)", min_value=0, step=100, value=None, placeholder="Ej: 5000")
         with c2:
-            mon_devolver = st.number_input("Debo entregar: ($)", min_value=0, step=100, value=None, placeholder="Ej: 3000")
+            mon_devolver = st.number_input("Debo entregar ($)", min_value=0, step=100, value=None, placeholder="Ej: 3000")
             
         desc = st.text_input("Descripción (Ej: Falta vuelto o Motivo)")
         
@@ -177,15 +184,21 @@ def modal_debo():
         for item in registros:
             c1, c2, c3 = st.columns([5, 2, 2])
             with c1:
-                t_dio = f" | Me dio: ${int(item['monto']):,}".replace(",", ".") if item.get('monto') else ""
-                t_deb = f" | **DEBO DAR: ${int(item['monto_devolver']):,}**".replace(",", ".") if item.get('monto_devolver') else ""
-                st.markdown(f"**👤 {item['nombre']}** {t_dio} {t_deb}")
+                st.markdown(f"**👤 {item['nombre']}**")
+                detalles = []
+                if item.get('monto'):
+                    detalles.append(f"Me dio: ${int(item['monto']):,}".replace(",", "."))
+                if item.get('monto_devolver'):
+                    detalles.append(f"Debo entregar: ${int(item['monto_devolver']):,}".replace(",", "."))
+                
+                if detalles:
+                    st.write(" | ".join(detalles))
                 st.caption(f"📝 {item.get('descripcion', '')}")
             with c2:
                 hora_bonita = formatear_hora_supabase(item.get('created_at', ''))
                 st.caption(f"🕒 {hora_bonita}")
             with c3:
-                if st.button("↩️ Devolver / Saldado", key=f"dev_{item['id']}"):
+                if st.button("↩️ Devolver", key=f"dev_{item['id']}"):
                     supabase.table("debo").delete().eq("id", item['id']).execute()
                     st.rerun()
             st.markdown("---")
@@ -380,10 +393,8 @@ with col_p:
                         </div>
                         """
                 else:
-                    # TICKET FANTASMA PARA QUE LA GAVETA SALTE SI SOLO SON BEBIDAS O CAJA VECINA
                     html_tickets = "<div style='font-size: 1px; color: white;'>.</div>"
                 
-                # LA ORDEN DE IMPRESIÓN SE ENVÍA SIEMPRE
                 html_completo = f"""
                 <!DOCTYPE html>
                 <html>
