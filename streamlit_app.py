@@ -70,6 +70,10 @@ if 'modo_editor' not in st.session_state:
     st.session_state.modo_editor = False
 if 'msj_scanner' not in st.session_state:
     st.session_state.msj_scanner = ""
+if 'ticket_imprimir' not in st.session_state:
+    st.session_state.ticket_imprimir = ""
+if 'msj_toast' not in st.session_state:
+    st.session_state.msj_toast = ""
 
 @st.cache_data(ttl=2)
 def leer_menu_rapido():
@@ -99,23 +103,21 @@ def ejecutar_finalizar_venta():
             "estado_impresion": "PENDIENTE" if es_comida else "N/A"
         })
 
-    # Guarda todo en la base de datos para tus métricas
     supabase.table("ventas").insert(ventas_to_insert).execute()
     
     conteo_comidas = {}
     for item in st.session_state.pedido_temporal:
         cat_mayuscula = filtro_estricto(item.get("categoria", "")).upper()
         
-        # SOLO ATRAPA COMIDA (Ignora por completo las bebidas y recargas)
         if cat_mayuscula in ["DESAYUNO", "ALMUERZO", "CENA"]:
             prod_limpio = item.get("producto", "")
             clave = (prod_limpio, cat_mayuscula)
             conteo_comidas[clave] = conteo_comidas.get(clave, 0) + 1
 
-    # SI HAY COMIDA, SE CREA EL TICKET. SI NO HAY COMIDA, SE CORTA LA COMUNICACIÓN CON LA IMPRESORA.
+    # SOLUCIÓN DEFINITIVA A LAS LETRAS CHINAS
     if conteo_comidas:
         html_tickets = ""
-        sello_invisible = f"<div id='{uuid.uuid4()}' style='display: none;'></div>"
+        id_ticket = str(uuid.uuid4()) # ID único para proteger este ticket
         fecha_ticket = obtener_hora_chile().strftime("%d/%m/%y, %H:%M")
         
         for (prod, cat), cantidad in conteo_comidas.items():
@@ -141,7 +143,8 @@ def ejecutar_finalizar_venta():
                 </div>
             </div>
             """
-            
+        
+        # El candado en Javascript: Se asegura de imprimir UNA SOLA VEZ y queda protegido de los reinicios.
         html_completo = f"""
         <!DOCTYPE html>
         <html>
@@ -152,17 +155,26 @@ def ejecutar_finalizar_venta():
                 body {{ margin: 0; padding: 0; font-family: Arial, sans-serif; }}
             </style>
         </head>
-        <body onload="setTimeout(function(){{ window.print(); }}, 800);">
+        <body>
             {html_tickets}
-            {sello_invisible}
+            <script>
+                var ticketId = "{id_ticket}";
+                if (localStorage.getItem("ultimo_ticket") !== ticketId) {{
+                    localStorage.setItem("ultimo_ticket", ticketId);
+                    setTimeout(function(){{ window.print(); }}, 500);
+                }}
+            </script>
         </body>
         </html>
         """
+        # NO se borra al instante. Se queda guardado para que Chrome tenga tiempo de sobra para imprimir.
         st.session_state.ticket_imprimir = html_completo
+        st.session_state.msj_toast = "✅ Ticket enviado a cocina."
     else:
-        # CERO SEÑAL, CERO ELECTRICIDAD, CERO LETRAS CHINAS
-        st.session_state.ticket_imprimir = None
-
+        # Si son puras bebidas o recargas, se limpia la señal. La impresora no recibe nada = Cero letras chinas.
+        st.session_state.ticket_imprimir = ""
+        st.session_state.msj_toast = "✅ Venta rápida registrada (Sin ticket)."
+        
     st.session_state.pedido_temporal = []
 
 
@@ -462,7 +474,9 @@ with col_p:
                 modal_venta_debo(total)
 
     # --- ZONA SEGURA DE IMPRESIÓN ---
-    if st.session_state.get("ticket_imprimir") is not None:
+    if st.session_state.ticket_imprimir:
         components.html(st.session_state.ticket_imprimir, height=0, width=0)
-        st.toast("✅ Ticket de cocina enviado.", icon="✅")
-        st.session_state.ticket_imprimir = None
+        
+    if st.session_state.msj_toast:
+        st.toast(st.session_state.msj_toast, icon="✅")
+        st.session_state.msj_toast = ""
