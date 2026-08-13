@@ -137,7 +137,8 @@ def ejecutar_finalizar_venta():
             </div>
             """
     else:
-        html_tickets = "<div style='font-size: 1px; color: white;'>.</div>"
+        # CORRECCIÓN LETRAS CHINAS: Si solo son bebidas, imprime un guion negro minúsculo para que la impresora no falle y salte la caja.
+        html_tickets = "<div style='font-size: 8px; color: black;'>-</div>"
     
     html_completo = f"""
     <!DOCTYPE html>
@@ -149,7 +150,7 @@ def ejecutar_finalizar_venta():
             body {{ margin: 0; padding: 0; font-family: Arial, sans-serif; }}
         </style>
     </head>
-    <body onload="setTimeout(function(){{ window.print(); }}, 500);">
+    <body onload="setTimeout(function(){{ window.print(); }}, 800);">
         {html_tickets}
         {sello_invisible}
     </body>
@@ -222,7 +223,6 @@ def modal_cajavecina():
             st.session_state.pedido_temporal.append({"categoria": "CAJA VECINA", "producto": "CAJA VECINA", "monto": int(monto_custom)})
             st.rerun()
 
-# --- ESTE ES EL BOTON GENERICO DE DEBO (Por si sacas fiado, sin vender nada) ---
 @st.dialog("🤝 Registro DEBO Manual", width="large")
 def modal_debo():
     with st.expander("➕ Agregar Nuevo Registro", expanded=False):
@@ -294,7 +294,6 @@ def modal_venta_debo(total_venta):
     if st.button("✅ Confirmar Venta y Guardar DEBO", type="primary", use_container_width=True):
         if nom and debo_entregar > 0:
             try:
-                # 1. Guardar en DEBO automáticamente
                 supabase.table("debo").insert({
                     "nombre": filtro_estricto(nom),
                     "descripcion": f"Vuelto pendiente de compra",
@@ -302,7 +301,6 @@ def modal_venta_debo(total_venta):
                     "monto_devolver": int(debo_entregar)
                 }).execute()
                 
-                # 2. Guardar venta real e Imprimir el ticket a cocina
                 ejecutar_finalizar_venta()
                 st.rerun()
             except Exception as e:
@@ -439,20 +437,21 @@ with col_p:
     st.divider()
     st.markdown(f"## TOTAL: \${total:,}".replace(",", "."))
     
-    # --- LOS DOS BOTONES DE COBRO MAGICO ---
+    # --- LOS DOS BOTONES DE COBRO MAGICO (NUEVO DISEÑO) ---
     if st.session_state.pedido_temporal:
         st.write("¿Cómo paga el cliente?")
-        col_f1, col_f2 = st.columns(2)
         
-        with col_f1:
-            if st.button("✅ PAGO EXACTO", type="primary", use_container_width=True):
-                try:
-                    ejecutar_finalizar_venta()
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"Error al guardar: {e}")
-                    
-        with col_f2:
+        # 1. Botón de Pago Exacto (Gigante y a lo ancho total)
+        if st.button("✅ PAGO EXACTO", type="primary", use_container_width=True):
+            try:
+                ejecutar_finalizar_venta()
+                st.rerun()
+            except Exception as e:
+                st.error(f"Error al guardar: {e}")
+                
+        # 2. Botón de Vuelto Pendiente (Más chico, abajo y centrado)
+        c_v1, c_v2, c_v3 = st.columns([1, 2, 1])
+        with c_v2:
             if st.button("🤝 VUELTO PENDIENTE", use_container_width=True):
                 modal_venta_debo(total)
 
