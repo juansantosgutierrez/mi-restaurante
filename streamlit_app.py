@@ -4,7 +4,6 @@ import pandas as pd
 from datetime import datetime
 from zoneinfo import ZoneInfo
 import streamlit.components.v1 as components
-import time
 import re
 import uuid
 
@@ -114,10 +113,10 @@ def ejecutar_finalizar_venta():
             clave = (prod_limpio, cat_mayuscula)
             conteo_comidas[clave] = conteo_comidas.get(clave, 0) + 1
 
-    # SOLUCIÓN DEFINITIVA A LAS LETRAS CHINAS
+    # SISTEMA ANTI-LETRAS CHINAS (TICKET INMORTAL SEPARADO DEL ESCÁNER)
     if conteo_comidas:
         html_tickets = ""
-        id_ticket = str(uuid.uuid4()) # ID único para proteger este ticket
+        id_ticket = str(uuid.uuid4())
         fecha_ticket = obtener_hora_chile().strftime("%d/%m/%y, %H:%M")
         
         for (prod, cat), cantidad in conteo_comidas.items():
@@ -144,36 +143,43 @@ def ejecutar_finalizar_venta():
             </div>
             """
         
-        # El candado en Javascript: Se asegura de imprimir UNA SOLA VEZ y queda protegido de los reinicios.
+        # Este código inyecta el ticket en Chrome para que no se corte aunque escanees otra cosa
         html_completo = f"""
-        <!DOCTYPE html>
-        <html>
-        <head>
-            <meta charset="UTF-8">
-            <style>
-                @page {{ margin: 0; }} 
-                body {{ margin: 0; padding: 0; font-family: Arial, sans-serif; }}
-            </style>
-        </head>
-        <body>
-            {html_tickets}
-            <script>
-                var ticketId = "{id_ticket}";
-                if (localStorage.getItem("ultimo_ticket") !== ticketId) {{
-                    localStorage.setItem("ultimo_ticket", ticketId);
-                    setTimeout(function(){{ window.print(); }}, 500);
+        <div id="ticket-content" style="display: none;">{html_tickets}</div>
+        <script>
+            var ticketId = "{id_ticket}";
+            if (localStorage.getItem("ultimo_ticket") !== ticketId) {{
+                localStorage.setItem("ultimo_ticket", ticketId);
+                
+                var parentDoc = window.parent.document;
+                var printIframe = parentDoc.getElementById('print-iframe');
+                if (!printIframe) {{
+                    printIframe = parentDoc.createElement('iframe');
+                    printIframe.id = 'print-iframe';
+                    printIframe.style.position = 'absolute';
+                    printIframe.style.top = '-10000px';
+                    parentDoc.body.appendChild(printIframe);
                 }}
-            </script>
-        </body>
-        </html>
+                
+                var ticketHtml = document.getElementById("ticket-content").innerHTML;
+                var iframeDoc = printIframe.contentWindow.document;
+                iframeDoc.open();
+                iframeDoc.write("<html><head><meta charset='UTF-8'><style>@page {{ margin: 0; }} body {{ margin: 0; padding: 0; font-family: Arial, sans-serif; color: black; }}</style></head><body>" + ticketHtml + "</body></html>");
+                iframeDoc.close();
+                
+                setTimeout(function() {{
+                    printIframe.contentWindow.focus();
+                    printIframe.contentWindow.print();
+                }}, 250);
+            }}
+        </script>
         """
-        # NO se borra al instante. Se queda guardado para que Chrome tenga tiempo de sobra para imprimir.
         st.session_state.ticket_imprimir = html_completo
-        st.session_state.msj_toast = "✅ Ticket enviado a cocina."
+        st.session_state.msj_toast = "✅ Venta con comida (Ticket enviado a cocina)"
     else:
-        # Si son puras bebidas o recargas, se limpia la señal. La impresora no recibe nada = Cero letras chinas.
+        # Cero señal a la impresora si solo hay bebidas
         st.session_state.ticket_imprimir = ""
-        st.session_state.msj_toast = "✅ Venta rápida registrada (Sin ticket)."
+        st.session_state.msj_toast = "✅ Venta rápida de Bebida/Otros registrada."
         
     st.session_state.pedido_temporal = []
 
@@ -299,7 +305,6 @@ def modal_debo():
                     st.rerun()
             st.markdown("---")
 
-# --- NUEVO MODAL: FINALIZAR VENTA DEJANDO VUELTO PENDIENTE ---
 @st.dialog("🤝 Vender y Dejar Vuelto Pendiente")
 def modal_venta_debo(total_venta):
     st.markdown(f"### Total del pedido: **${total_venta:,}**".replace(",", "."))
@@ -476,6 +481,7 @@ with col_p:
     # --- ZONA SEGURA DE IMPRESIÓN ---
     if st.session_state.ticket_imprimir:
         components.html(st.session_state.ticket_imprimir, height=0, width=0)
+        st.session_state.ticket_imprimir = ""
         
     if st.session_state.msj_toast:
         st.toast(st.session_state.msj_toast, icon="✅")
