@@ -70,8 +70,6 @@ if 'modo_editor' not in st.session_state:
     st.session_state.modo_editor = False
 if 'msj_scanner' not in st.session_state:
     st.session_state.msj_scanner = ""
-if 'ticket_imprimir' not in st.session_state:
-    st.session_state.ticket_imprimir = None
 
 @st.cache_data(ttl=2)
 def leer_menu_rapido():
@@ -101,19 +99,20 @@ def ejecutar_finalizar_venta():
             "estado_impresion": "PENDIENTE" if es_comida else "N/A"
         })
 
+    # Guarda todo en la base de datos para tus métricas
     supabase.table("ventas").insert(ventas_to_insert).execute()
     
     conteo_comidas = {}
     for item in st.session_state.pedido_temporal:
         cat_mayuscula = filtro_estricto(item.get("categoria", "")).upper()
         
-        # SOLO REGISTRA COMIDAS PARA IMPRIMIR
+        # SOLO ATRAPA COMIDA (Ignora por completo las bebidas y recargas)
         if cat_mayuscula in ["DESAYUNO", "ALMUERZO", "CENA"]:
             prod_limpio = item.get("producto", "")
             clave = (prod_limpio, cat_mayuscula)
             conteo_comidas[clave] = conteo_comidas.get(clave, 0) + 1
 
-    # SI HAY COMIDA, SE CREA EL TICKET. SI NO HAY COMIDA, NO SE IMPRIME NADA.
+    # SI HAY COMIDA, SE CREA EL TICKET. SI NO HAY COMIDA, SE CORTA LA COMUNICACIÓN CON LA IMPRESORA.
     if conteo_comidas:
         html_tickets = ""
         sello_invisible = f"<div id='{uuid.uuid4()}' style='display: none;'></div>"
@@ -153,7 +152,7 @@ def ejecutar_finalizar_venta():
                 body {{ margin: 0; padding: 0; font-family: Arial, sans-serif; }}
             </style>
         </head>
-        <body onload="setTimeout(function(){{ window.print(); }}, 500);">
+        <body onload="setTimeout(function(){{ window.print(); }}, 800);">
             {html_tickets}
             {sello_invisible}
         </body>
@@ -161,7 +160,7 @@ def ejecutar_finalizar_venta():
         """
         st.session_state.ticket_imprimir = html_completo
     else:
-        # Si es bebida o Caja vecina, no hace nada con la impresora. Cero errores chinos.
+        # CERO SEÑAL, CERO ELECTRICIDAD, CERO LETRAS CHINAS
         st.session_state.ticket_imprimir = None
 
     st.session_state.pedido_temporal = []
@@ -288,6 +287,7 @@ def modal_debo():
                     st.rerun()
             st.markdown("---")
 
+# --- NUEVO MODAL: FINALIZAR VENTA DEJANDO VUELTO PENDIENTE ---
 @st.dialog("🤝 Vender y Dejar Vuelto Pendiente")
 def modal_venta_debo(total_venta):
     st.markdown(f"### Total del pedido: **${total_venta:,}**".replace(",", "."))
@@ -462,10 +462,7 @@ with col_p:
                 modal_venta_debo(total)
 
     # --- ZONA SEGURA DE IMPRESIÓN ---
-    if st.session_state.ticket_imprimir:
+    if st.session_state.get("ticket_imprimir") is not None:
         components.html(st.session_state.ticket_imprimir, height=0, width=0)
-        st.toast("✅ Venta con comida registrada (Ticket en cocina)", icon="✅")
-        st.session_state.ticket_imprimir = None
-    elif st.session_state.ticket_imprimir == "":
-        st.toast("✅ Venta rápida registrada (Sin ticket)", icon="✅")
+        st.toast("✅ Ticket de cocina enviado.", icon="✅")
         st.session_state.ticket_imprimir = None
