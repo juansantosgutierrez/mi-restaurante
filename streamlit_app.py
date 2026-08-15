@@ -113,7 +113,6 @@ def ejecutar_finalizar_venta():
             clave = (prod_limpio, cat_mayuscula)
             conteo_comidas[clave] = conteo_comidas.get(clave, 0) + 1
 
-    # SISTEMA ANTI-LETRAS CHINAS (TICKET INMORTAL SEPARADO DEL ESCÁNER)
     if conteo_comidas:
         html_tickets = ""
         id_ticket = str(uuid.uuid4())
@@ -143,7 +142,7 @@ def ejecutar_finalizar_venta():
             </div>
             """
         
-        # Este código inyecta el ticket en Chrome para que no se corte aunque escanees otra cosa
+        # AQUI ESTA LA MAGIA: Se cambió a 1500 milisegundos para que el Mini PC respire antes de imprimir
         html_completo = f"""
         <div id="ticket-content" style="display: none;">{html_tickets}</div>
         <script>
@@ -170,14 +169,13 @@ def ejecutar_finalizar_venta():
                 setTimeout(function() {{
                     printIframe.contentWindow.focus();
                     printIframe.contentWindow.print();
-                }}, 250);
+                }}, 1500); 
             }}
         </script>
         """
         st.session_state.ticket_imprimir = html_completo
         st.session_state.msj_toast = "✅ Venta con comida (Ticket enviado a cocina)"
     else:
-        # Cero señal a la impresora si solo hay bebidas
         st.session_state.ticket_imprimir = ""
         st.session_state.msj_toast = "✅ Venta rápida de Bebida/Otros registrada."
         
