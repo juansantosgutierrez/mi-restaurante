@@ -11,87 +11,60 @@ import uuid
 def obtener_hora_chile():
     return datetime.now(ZoneInfo("America/Santiago"))
 
-def formatear_hora_supabase(fecha_utc_str):
-    try:
-        dt = datetime.fromisoformat(fecha_utc_str.replace('Z', '+00:00'))
-        dt_chile = dt.astimezone(ZoneInfo("America/Santiago"))
-        return dt_chile.strftime("%H:%M hrs")
-    except:
-        return fecha_utc_str
-
-# --- 🛡️ FILTRO DICTATORIAL ---
+# --- 🛡️ FILTRO DICTATORIAL (Rápido) ---
 def filtro_estricto(texto):
     if not texto: return ""
-    t = str(texto).upper()
-    t = t.replace('Á','A').replace('É','E').replace('Í','I').replace('Ó','O').replace('Ú','U').replace('Ñ','N')
-    t_limpio = re.sub(r'[^A-Z0-9\s+]', '', t)
-    return t_limpio.strip()
+    t = str(texto).upper().translate(str.maketrans('ÁÉÍÓÚÑ', 'AEIOUN'))
+    return re.sub(r'[^A-Z0-9\s+]', '', t).strip()
 
-# --- ☕ FUNCIÓN INTELIGENTE PARA AGREGAR BEBIDA AL DESAYUNO ---
-def aplicar_bebida_desayuno(categoria, producto):
-    cat = filtro_estricto(categoria).upper()
-    prod = filtro_estricto(producto).upper()
-    
-    if cat == "DESAYUNO":
-        excluir = ["CALDO", "CAFE", "TE", "MATE"]
-        if not any(x in prod for x in excluir):
-            bebida_seleccionada = st.session_state.get("bebida_desayuno", "Ninguna")
-            if bebida_seleccionada != "Ninguna":
-                prod = f"{prod} + {filtro_estricto(bebida_seleccionada).upper()}"
-    return prod
-
-# 🎨 Configuración de pantalla
+# 🎨 Configuración de pantalla ultra-ancha
 st.set_page_config(page_title="Restaurante Santos", layout="wide")
 
-URL_SUPABASE = "https://luklxueplpxdktreuloa.supabase.co"
-KEY_SUPABASE = "sb_publishable_KxAtLO6z0_4SUtbpQDWekQ_mKXZZebX"
-supabase: Client = create_client(URL_SUPABASE, KEY_SUPABASE)
+# CONEXIÓN SUPABASE (Optimizada para no recargar)
+@st.cache_resource
+def init_connection():
+    URL_SUPABASE = "https://luklxueplpxdktreuloa.supabase.co"
+    KEY_SUPABASE = "sb_publishable_KxAtLO6z0_4SUtbpQDWekQ_mKXZZebX"
+    return create_client(URL_SUPABASE, KEY_SUPABASE)
+
+supabase = init_connection()
 
 st.markdown("""
     <style>
     [data-testid="stSidebarUserContent"] { padding-top: 1rem; }
     .stColumn > div { position: sticky; top: 50px; height: auto; }
     div[data-testid="stTextInput"]:has(input[placeholder="oculto_scanner"]) {
-        position: absolute !important;
-        left: -9999px !important;
-        opacity: 0 !important;
-        height: 0px !important;
-        width: 0px !important;
-        margin: 0 !important;
-        padding: 0 !important;
+        position: absolute !important; left: -9999px !important; opacity: 0 !important;
+        height: 0px !important; width: 0px !important; margin: 0 !important; padding: 0 !important;
     }
     </style>
 """, unsafe_allow_html=True)
 
-if 'pedido_temporal' not in st.session_state:
-    st.session_state.pedido_temporal = []
-if 'modo_editor' not in st.session_state:
-    st.session_state.modo_editor = False
-if 'msj_scanner' not in st.session_state:
-    st.session_state.msj_scanner = ""
-if 'ticket_imprimir' not in st.session_state:
-    st.session_state.ticket_imprimir = ""
-if 'msj_toast' not in st.session_state:
-    st.session_state.msj_toast = ""
+# INICIALIZAR VARIABLES
+for key in ['pedido_temporal', 'modo_editor', 'lector_codigo', 'ticket_imprimir', 'msj_toast']:
+    if key not in st.session_state:
+        st.session_state[key] = [] if key == 'pedido_temporal' else (False if key == 'modo_editor' else "")
 
+# CACHÉ DEL MENÚ (Ultra rápido)
 @st.cache_data(ttl=2)
 def leer_menu_rapido():
     try: 
-        response = supabase.table("menu_dia").select("*").execute()
-        df = pd.DataFrame(response.data)
+        df = pd.DataFrame(supabase.table("menu_dia").select("*").execute().data)
         return df if not df.empty else pd.DataFrame(columns=["id", "categoria", "producto", "monto", "codigo"])
     except: 
         return pd.DataFrame(columns=["id", "categoria", "producto", "monto", "codigo"])
 
+df_menu = leer_menu_rapido()
+
 # --- FUNCION MAESTRA PARA COBRAR E IMPRIMIR ---
 def ejecutar_finalizar_venta():
-    if not st.session_state.pedido_temporal:
-        return
+    if not st.session_state.pedido_temporal: return
 
     ventas_to_insert = []
+    conteo_comidas = {}
     
     for item in st.session_state.pedido_temporal:
-        cat_limpia = filtro_estricto(item.get("categoria", "")).upper()
+        cat_limpia = filtro_estricto(item.get("categoria", ""))
         es_comida = cat_limpia in ["DESAYUNO", "ALMUERZO", "CENA"]
         
         ventas_to_insert.append({
@@ -101,282 +74,178 @@ def ejecutar_finalizar_venta():
             "tipo": "PAGADO",
             "estado_impresion": "PENDIENTE" if es_comida else "N/A"
         })
+        
+        if es_comida:
+            clave = (item.get("producto", ""), cat_limpia)
+            conteo_comidas[clave] = conteo_comidas.get(clave, 0) + 1
 
     supabase.table("ventas").insert(ventas_to_insert).execute()
-    
-    conteo_comidas = {}
-    for item in st.session_state.pedido_temporal:
-        cat_mayuscula = filtro_estricto(item.get("categoria", "")).upper()
-        
-        if cat_mayuscula in ["DESAYUNO", "ALMUERZO", "CENA"]:
-            prod_limpio = item.get("producto", "")
-            clave = (prod_limpio, cat_mayuscula)
-            conteo_comidas[clave] = conteo_comidas.get(clave, 0) + 1
 
     if conteo_comidas:
         html_tickets = ""
-        id_ticket = str(uuid.uuid4())
         fecha_ticket = obtener_hora_chile().strftime("%d/%m/%y, %H:%M")
         
         for (prod, cat), cantidad in conteo_comidas.items():
             texto_cantidad = f"{cantidad}x " if cantidad > 1 else ""
-            
-            if " + " in prod:
-                partes = prod.split(" + ")
-                comida_principal = partes[0]
-                bebida_agregada = f"<div style='font-size: 20px; font-weight: bold; margin-top: 2px; color: #000;'>+ {partes[1]}</div>"
-            else:
-                comida_principal = prod
-                bebida_agregada = ""
+            partes = prod.split(" + ")
+            comida_principal = partes[0]
+            bebida_agregada = f"<div style='font-size: 20px; font-weight: bold; margin-top: 2px; color: #000;'>+ {partes[1]}</div>" if len(partes) > 1 else ""
 
             html_tickets += f"""
-            <div style="page-break-after: always; text-align: left; width: 100%; font-family: 'Arial', sans-serif; padding: 0; margin: 0;">
-                <p style="font-size: 12px; margin: 0; color: #000;">{fecha_ticket}</p>
-                <p style="font-size: 12px; margin: 0; margin-bottom: 15px; color: #000;">Restaurante Santos</p>
-                
+            <div style="page-break-after: always; text-align: left; width: 100%; font-family: 'Arial', sans-serif; padding: 0; margin: 0; color: black;">
+                <p style="font-size: 12px; margin: 0;">{fecha_ticket}</p>
+                <p style="font-size: 12px; margin: 0; margin-bottom: 15px;">Restaurante Santos</p>
                 <div style="text-align: center; margin-top: 10px;">
                     <h1 style="font-size: 28px; margin: 0; font-weight: bold; text-transform: uppercase; line-height: 1.1;">{texto_cantidad}{comida_principal}</h1>
                     {bebida_agregada}
-                    <p style="font-size: 14px; margin: 5px 0 20px 0; text-transform: uppercase; color: #000;">({cat})</p>
+                    <p style="font-size: 14px; margin: 5px 0 20px 0; text-transform: uppercase;">({cat})</p>
                 </div>
             </div>
             """
         
-        # AQUI ESTA LA MAGIA: Se cambió a 1500 milisegundos para que el Mini PC respire antes de imprimir
-        html_completo = f"""
-        <div id="ticket-content" style="display: none;">{html_tickets}</div>
-        <script>
-            var ticketId = "{id_ticket}";
-            if (localStorage.getItem("ultimo_ticket") !== ticketId) {{
-                localStorage.setItem("ultimo_ticket", ticketId);
-                
-                var parentDoc = window.parent.document;
-                var printIframe = parentDoc.getElementById('print-iframe');
-                if (!printIframe) {{
-                    printIframe = parentDoc.createElement('iframe');
-                    printIframe.id = 'print-iframe';
-                    printIframe.style.position = 'absolute';
-                    printIframe.style.top = '-10000px';
-                    parentDoc.body.appendChild(printIframe);
-                }}
-                
-                var ticketHtml = document.getElementById("ticket-content").innerHTML;
-                var iframeDoc = printIframe.contentWindow.document;
-                iframeDoc.open();
-                iframeDoc.write("<html><head><meta charset='UTF-8'><style>@page {{ margin: 0; }} body {{ margin: 0; padding: 0; font-family: Arial, sans-serif; color: black; }}</style></head><body>" + ticketHtml + "</body></html>");
-                iframeDoc.close();
-                
-                setTimeout(function() {{
-                    printIframe.contentWindow.focus();
-                    printIframe.contentWindow.print();
-                }}, 1500); 
-            }}
-        </script>
+        # SISTEMA DE IMPRESIÓN DIRECTO (Codificación nativa sin trucos raros, 100% anti letras chinas)
+        st.session_state.ticket_imprimir = f"""
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta charset="UTF-8">
+            <style>@page {{ margin: 0; }} body {{ margin: 0; padding: 0; }}</style>
+        </head>
+        <body>
+            {html_tickets}
+            <script>
+                setTimeout(function(){{ window.print(); }}, 1000);
+            </script>
+        </body>
+        </html>
         """
-        st.session_state.ticket_imprimir = html_completo
-        st.session_state.msj_toast = "✅ Venta con comida (Ticket enviado a cocina)"
+        st.session_state.msj_toast = "✅ Venta registrada (Imprimiendo Ticket)"
     else:
         st.session_state.ticket_imprimir = ""
-        st.session_state.msj_toast = "✅ Venta rápida de Bebida/Otros registrada."
+        st.session_state.msj_toast = "✅ Venta rápida registrada (Sin ticket)."
         
     st.session_state.pedido_temporal = []
 
+# --- MODALES OPTIMIZADOS CON TECLA ENTER ---
+
+@st.dialog("☕ Elegir Bebida")
+def modal_desayuno(row):
+    st.write(f"Has seleccionado: **{row['producto']}**")
+    with st.form("form_bebida", clear_on_submit=True):
+        bebida = st.radio("¿Qué bebida llevará?", ["Ninguna", "Té", "Café", "Mate"], horizontal=True)
+        if st.form_submit_button("✅ Confirmar y Agregar", type="primary", use_container_width=True):
+            prod = row['producto']
+            if bebida != "Ninguna":
+                prod = f"{prod} + {filtro_estricto(bebida)}"
+            
+            st.session_state.pedido_temporal.append({
+                "categoria": filtro_estricto(row['categoria']), 
+                "producto": prod, 
+                "monto": row['monto']
+            })
+            st.rerun()
 
 @st.dialog("➕ Nuevo Producto")
 def modal_nuevo(cat):
-    n = st.text_input(f"Nombre del {cat}")
-    p = st.number_input("Precio ($)", min_value=0, step=100, value=None, placeholder="Ej: 1500")
-    c = st.text_input("Código de Barras (Opcional - Pistolea aquí)")
-    if st.button("Guardar"):
-        if n and p is not None and p > 0:
-            datos_nuevos = {"categoria": filtro_estricto(cat), "producto": filtro_estricto(n), "monto": int(p)}
-            if c: datos_nuevos["codigo"] = filtro_estricto(c)
-            supabase.table("menu_dia").insert(datos_nuevos).execute()
-            st.cache_data.clear() 
-            st.rerun()
+    with st.form("form_nuevo_prod", clear_on_submit=True):
+        n = st.text_input(f"Nombre del {cat}")
+        p = st.number_input("Precio ($)", min_value=0, step=100, value=None)
+        c = st.text_input("Código de Barras (Opcional)")
+        if st.form_submit_button("Guardar (Presiona Enter)"):
+            if n and p:
+                datos = {"categoria": filtro_estricto(cat), "producto": filtro_estricto(n), "monto": int(p)}
+                if c: datos["codigo"] = filtro_estricto(c)
+                supabase.table("menu_dia").insert(datos).execute()
+                st.cache_data.clear()
+                st.rerun()
 
 @st.dialog("📦 Venta Especial")
 def modal_otros():
-    desc = st.text_input("¿Qué se vendió?")
-    m = st.number_input("Monto ($)", min_value=0, step=100, value=None, placeholder="Ej: 5000")
-    if st.button("Agregar al Pedido"):
-        if desc and m is not None and m > 0:
-            st.session_state.pedido_temporal.append({"categoria": "OTROS", "producto": filtro_estricto(desc), "monto": int(m)})
-            st.rerun()
+    with st.form("form_otros", clear_on_submit=True):
+        desc = st.text_input("¿Qué se vendió?")
+        m = st.number_input("Monto ($)", min_value=0, step=100, value=None)
+        if st.form_submit_button("Agregar al Pedido (Presiona Enter)"):
+            if desc and m:
+                st.session_state.pedido_temporal.append({"categoria": "OTROS", "producto": filtro_estricto(desc), "monto": int(m)})
+                st.rerun()
 
 @st.dialog("💸 Gasto")
 def modal_gastos():
-    ahora = obtener_hora_chile()
-    st.info(f"🕒 **Registro de Gasto** ({ahora.strftime('%H:%M')} hrs)")
-    m = st.number_input("Monto ($)", min_value=0, step=500, value=None, placeholder="Ej: 10000")
-    d = st.text_input("Descripción")
-    if st.button("Guardar Gasto"):
-        if m is not None and m > 0:
-            supabase.table("gastos").insert({"monto": int(m), "descripcion": filtro_estricto(d)}).execute()
-            st.success("Gasto guardado correctamente")
-            st.rerun()
+    with st.form("form_gasto", clear_on_submit=True):
+        m = st.number_input("Monto ($)", min_value=0, step=500, value=None)
+        d = st.text_input("Descripción")
+        if st.form_submit_button("Guardar Gasto (Presiona Enter)"):
+            if m:
+                supabase.table("gastos").insert({"monto": int(m), "descripcion": filtro_estricto(d)}).execute()
+                st.success("Guardado")
+                st.rerun()
 
 @st.dialog("🏦 CAJA VECINA")
 def modal_cajavecina():
-    st.caption("Selección rápida:")
-    c1, c2, c3 = st.columns(3)
-    if c1.button("$1.000", use_container_width=True):
-        st.session_state.pedido_temporal.append({"categoria": "CAJA VECINA", "producto": "CAJA VECINA", "monto": 1000})
-        st.rerun()
-    if c2.button("$2.000", use_container_width=True):
-        st.session_state.pedido_temporal.append({"categoria": "CAJA VECINA", "producto": "CAJA VECINA", "monto": 2000})
-        st.rerun()
-    if c3.button("$3.000", use_container_width=True):
-        st.session_state.pedido_temporal.append({"categoria": "CAJA VECINA", "producto": "CAJA VECINA", "monto": 3000})
-        st.rerun()
-
-    c4, c5 = st.columns(2)
-    if c4.button("$4.000", use_container_width=True):
-        st.session_state.pedido_temporal.append({"categoria": "CAJA VECINA", "producto": "CAJA VECINA", "monto": 4000})
-        st.rerun()
-    if c5.button("$5.000", use_container_width=True):
-        st.session_state.pedido_temporal.append({"categoria": "CAJA VECINA", "producto": "CAJA VECINA", "monto": 5000})
-        st.rerun()
-
-    st.divider()
-    monto_custom = st.number_input("Otro monto ($):", min_value=0, step=500, value=None, placeholder="Ej: 7500")
-    if st.button("✅ Agregar otro monto", type="primary", use_container_width=True):
-        if monto_custom is not None and monto_custom > 0:
-            st.session_state.pedido_temporal.append({"categoria": "CAJA VECINA", "producto": "CAJA VECINA", "monto": int(monto_custom)})
+    montos = [1000, 2000, 3000, 4000, 5000]
+    cols = st.columns(3) + st.columns(2)
+    for idx, monto in enumerate(montos):
+        if cols[idx].button(f"${monto:,}".replace(',', '.'), use_container_width=True):
+            st.session_state.pedido_temporal.append({"categoria": "CAJA VECINA", "producto": "CAJA VECINA", "monto": monto})
             st.rerun()
-
-@st.dialog("🤝 Registro DEBO Manual", width="large")
-def modal_debo():
-    with st.expander("➕ Agregar Nuevo Registro", expanded=False):
-        nom = st.text_input("Nombre de la persona")
-        c1, c2 = st.columns(2)
-        with c1:
-            mon_recibido = st.number_input("Monto que me dio ($)", min_value=0, step=100, value=None, placeholder="Ej: 5000")
-        with c2:
-            mon_devolver = st.number_input("Debo entregar ($)", min_value=0, step=100, value=None, placeholder="Ej: 3000")
-            
-        desc = st.text_input("Descripción (Ej: Falta vuelto o Motivo)")
-        
-        if st.button("💾 Guardar Registro", type="primary"):
-            if nom and desc:
-                datos = {"nombre": filtro_estricto(nom), "descripcion": filtro_estricto(desc)}
-                if mon_recibido is not None: datos["monto"] = int(mon_recibido)
-                if mon_devolver is not None: datos["monto_devolver"] = int(mon_devolver)
-                
-                supabase.table("debo").insert(datos).execute()
-                st.rerun() 
-            else:
-                st.error("Ingresa al menos el nombre y la descripción.")
-
     st.divider()
-    st.caption("📅 Registros del día:")
-    fecha_sel = st.date_input("Fecha", obtener_hora_chile().date(), label_visibility="collapsed")
-    fecha_ini = f"{fecha_sel}T00:00:00"
-    fecha_fin = f"{fecha_sel}T23:59:59"
-    try:
-        res = supabase.table("debo").select("*").gte("created_at", fecha_ini).lte("created_at", fecha_fin).order("created_at", desc=True).execute()
-        registros = res.data
-    except Exception: registros = []
-        
-    if not registros:
-        st.info("ℹ️ No hay registros pendientes para esta fecha.")
-    else:
-        for item in registros:
-            c1, c2, c3 = st.columns([5, 2, 2])
-            with c1:
-                st.markdown(f"**👤 {item['nombre']}**")
-                detalles = []
-                if item.get('monto'):
-                    detalles.append(f"Me dio: \${int(item['monto']):,}".replace(",", "."))
-                if item.get('monto_devolver'):
-                    detalles.append(f"Debo entregar: \${int(item['monto_devolver']):,}".replace(",", "."))
-                
-                if detalles:
-                    st.write(" | ".join(detalles))
-                st.caption(f"📝 {item.get('descripcion', '')}")
-            with c2:
-                hora_bonita = formatear_hora_supabase(item.get('created_at', ''))
-                st.caption(f"🕒 {hora_bonita}")
-            with c3:
-                if st.button("↩️ Devolver", key=f"dev_{item['id']}"):
-                    supabase.table("debo").delete().eq("id", item['id']).execute()
-                    st.rerun()
-            st.markdown("---")
+    with st.form("form_cv", clear_on_submit=True):
+        m_custom = st.number_input("Otro monto ($):", min_value=0, step=500, value=None)
+        if st.form_submit_button("✅ Agregar (Presiona Enter)", type="primary", use_container_width=True):
+            if m_custom:
+                st.session_state.pedido_temporal.append({"categoria": "CAJA VECINA", "producto": "CAJA VECINA", "monto": int(m_custom)})
+                st.rerun()
 
 @st.dialog("🤝 Vender y Dejar Vuelto Pendiente")
 def modal_venta_debo(total_venta):
-    st.markdown(f"### Total del pedido: **${total_venta:,}**".replace(",", "."))
-    nom = st.text_input("Nombre del cliente (A quien le debo)")
-    mon_recibido = st.number_input("Monto en billete que me dio ($)", min_value=total_venta, step=1000, value=total_venta)
+    st.markdown(f"### Total: **${total_venta:,}**".replace(",", "."))
+    nom = st.text_input("Nombre del cliente")
+    mon = st.number_input("Monto que dio ($)", min_value=total_venta, step=1000, value=total_venta)
+    deuda = mon - total_venta
+    st.info(f"**Vuelto pendiente:** ${deuda:,}".replace(",", "."))
     
-    debo_entregar = mon_recibido - total_venta
-    st.info(f"**Vuelto que quedo debiendo:** ${debo_entregar:,}".replace(",", "."))
-    
-    if st.button("✅ Confirmar Venta y Guardar DEBO", type="primary", use_container_width=True):
-        if nom and debo_entregar > 0:
-            try:
-                supabase.table("debo").insert({
-                    "nombre": filtro_estricto(nom),
-                    "descripcion": f"Vuelto pendiente de compra",
-                    "monto": int(mon_recibido),
-                    "monto_devolver": int(debo_entregar)
-                }).execute()
-                
-                ejecutar_finalizar_venta()
-                st.rerun()
-            except Exception as e:
-                st.error(f"Error: {e}")
-        elif debo_entregar <= 0:
-            st.warning("El vuelto es cero. Cierra esta ventana y usa el botón de Venta Exacta.")
-        else:
-            st.error("Falta anotar el nombre del cliente.")
+    if st.button("✅ Confirmar Venta", type="primary", use_container_width=True):
+        if nom and deuda > 0:
+            supabase.table("debo").insert({"nombre": filtro_estricto(nom), "descripcion": "Vuelto pendiente", "monto": int(mon), "monto_devolver": int(deuda)}).execute()
+            ejecutar_finalizar_venta()
+            st.rerun()
+        elif deuda <= 0: st.warning("Usa Venta Exacta.")
+        else: st.error("Falta el nombre.")
 
+# LÓGICA DEL ESCÁNER INVISIBLE
 def procesar_scanner():
-    codigo_leido = filtro_estricto(st.session_state.lector_codigo)
-    if codigo_leido:
-        menu_actual = leer_menu_rapido() 
-        if "codigo" in menu_actual.columns:
-            menu_actual['codigo_str'] = menu_actual['codigo'].fillna('').astype(str).apply(filtro_estricto)
-            producto_encontrado = menu_actual[menu_actual['codigo_str'] == codigo_leido]
-            if not producto_encontrado.empty:
-                row = producto_encontrado.iloc[0]
-                
-                prod_final = aplicar_bebida_desayuno(row['categoria'], row['producto'])
-                
-                st.session_state.pedido_temporal.append({
-                    "categoria": filtro_estricto(row['categoria']), 
-                    "producto": prod_final, 
-                    "monto": row['monto']
-                })
-                st.toast(f"✅ {prod_final} agregado.")
+    codigo = filtro_estricto(st.session_state.lector_codigo)
+    if codigo and "codigo" in df_menu.columns:
+        df_menu['codigo_str'] = df_menu['codigo'].fillna('').astype(str).apply(filtro_estricto)
+        encontrado = df_menu[df_menu['codigo_str'] == codigo]
+        if not encontrado.empty:
+            row = encontrado.iloc[0]
+            cat_limpia = filtro_estricto(row['categoria'])
+            # Si el escáner lee un desayuno que casualmente tenía código de barras (raro, pero por si acaso):
+            if cat_limpia == "DESAYUNO" and not any(x in row['producto'] for x in ["CALDO", "CAFE", "TE", "MATE"]):
+                # Agregar sin bebida directo para no interrumpir el flujo del escáner
+                st.session_state.pedido_temporal.append({"categoria": cat_limpia, "producto": row['producto'], "monto": row['monto']})
             else:
-                st.toast("❌ Producto no encontrado.", icon="❌")
+                st.session_state.pedido_temporal.append({"categoria": cat_limpia, "producto": row['producto'], "monto": row['monto']})
+            
+            st.session_state.msj_toast = f"✅ Escaneado"
         else:
-            st.toast("⚠️ Falta la columna 'codigo'.", icon="⚠️")
+            st.session_state.msj_toast = "❌ Producto no encontrado"
     st.session_state.lector_codigo = ""
-
-# --- CARGAR DATOS ---
-df_menu = leer_menu_rapido()
 
 # --- INTERFAZ PRINCIPAL ---
 c1, c2, c3, c4, c5 = st.columns([2, 1, 1, 1, 1])
 c1.title("🍴 Restaurante Santos")
 if c2.button("💸 GASTOS", use_container_width=True): modal_gastos()
-if c3.button("🤝 DEBO", use_container_width=True): modal_debo()
-if c4.button("🏦 CAJA VECINA", use_container_width=True): modal_cajavecina()
-
-if c1.button("🔄 Sincronizar Datos"):
-    st.cache_data.clear()
-    st.rerun()
-
-txt_btn = "🔄 CERRAR EDITOR" if st.session_state.modo_editor else "➕ MENÚ HOY"
-if c5.button(txt_btn, use_container_width=True):
+if c3.button("🔄 DATOS", use_container_width=True): st.cache_data.clear(); st.rerun()
+if c4.button("🏦 C. VECINA", use_container_width=True): modal_cajavecina()
+if c5.button("🔄 EDITOR" if st.session_state.modo_editor else "➕ MENÚ", use_container_width=True):
     st.session_state.modo_editor = not st.session_state.modo_editor
     st.rerun()
 
 col_m, col_p = st.columns([3, 1])
 
-# COLUMNA IZQUIERDA: MENÚ
+# LADO IZQUIERDO (BOTONES)
 with col_m:
     def mostrar_seccion(titulo, cat, especial=None):
         st.header(titulo)
@@ -387,36 +256,34 @@ with col_m:
         else:
             cat_limpia = filtro_estricto(cat)
             items = df_menu[df_menu["categoria"].apply(lambda x: filtro_estricto(str(x))) == cat_limpia]
-            for i, (idx, row) in enumerate(items.iterrows()):
+            for i, (_, row) in enumerate(items.iterrows()):
                 with grid[i % 5]:
                     if st.session_state.modo_editor:
                         if st.button("❌", key=f"d_{row['id']}"):
                             supabase.table("menu_dia").delete().eq("id", row['id']).execute()
                             st.cache_data.clear()
                             st.rerun()
-                    p_f = f"${int(row['monto']):,}".replace(",", ".")
-                    
-                    if st.button(f"{row['producto']}\n\n{p_f}", key=f"b_{row['id']}", use_container_width=True):
-                        prod_final = aplicar_bebida_desayuno(row['categoria'], row['producto'])
-                        
-                        st.session_state.pedido_temporal.append({
-                            "categoria": filtro_estricto(row['categoria']), 
-                            "producto": prod_final, 
-                            "monto": row['monto']
-                        })
-                        st.rerun()
-            
+                            
+                    # BOTONES DEL MENÚ
+                    if st.button(f"{row['producto']}\n\n${int(row['monto']):,}".replace(",", "."), key=f"b_{row['id']}", use_container_width=True):
+                        # Lógica especial para el desayuno (Abre la ventanita)
+                        if cat_limpia == "DESAYUNO" and not any(x in filtro_estricto(row['producto']) for x in ["CALDO", "CAFE", "TE", "MATE"]):
+                            modal_desayuno(row)
+                        else:
+                            st.session_state.pedido_temporal.append({
+                                "categoria": cat_limpia, 
+                                "producto": row['producto'], 
+                                "monto": row['monto']
+                            })
+                            st.rerun()
+                            
             if st.session_state.modo_editor:
                 with grid[len(items) % 5]:
-                    btn_label = "➕\n\nNuevo\n" + str(titulo)
-                    if st.button(btn_label, key="add_btn_" + cat, use_container_width=True):
-                        modal_nuevo(cat)
+                    if st.button(f"➕\n\nNuevo\n{titulo}", key=f"add_{cat}", use_container_width=True): modal_nuevo(cat)
 
     with st.expander("🍔 COMIDA", expanded=True):
         t1, t2, t3 = st.tabs(["🍳 Desayuno", "🍲 Almuerzo", "🌙 Cena"])
-        with t1: 
-            st.radio("☕ Bebida incluida (Solo sándwiches/atún):", ["Ninguna", "Té", "Café", "Mate"], horizontal=True, key="bebida_desayuno")
-            mostrar_seccion("Desayuno", "Desayuno")
+        with t1: mostrar_seccion("Desayuno", "Desayuno")
         with t2: mostrar_seccion("Almuerzo", "Almuerzo")
         with t3: mostrar_seccion("Cena", "Cena")
     
@@ -425,58 +292,39 @@ with col_m:
     mostrar_seccion("🍺 CHELA", "Chela")
     mostrar_seccion("📦 OTROS", "Otros", especial="Otros")
 
-# COLUMNA DERECHA: CARRITO Y ESCÁNER INVISIBLE
+# LADO DERECHO (CARRITO)
 with col_p:
-    st.text_input("Lector Oculto", key="lector_codigo", on_change=procesar_scanner, placeholder="oculto_scanner", label_visibility="collapsed")
-    
+    st.text_input("Lector", key="lector_codigo", on_change=procesar_scanner, placeholder="oculto_scanner", label_visibility="collapsed")
     components.html("""
         <script>
-        function enfocarLector() {
-            var parent = window.parent.document;
-            var activo = parent.activeElement;
-            if (activo && (activo.tagName === 'INPUT' || activo.tagName === 'TEXTAREA')) {
-                if (activo.placeholder !== "oculto_scanner") { return; }
-            }
-            var lector = parent.querySelector('input[placeholder="oculto_scanner"]');
-            if (lector) { lector.focus(); }
-        }
-        setInterval(enfocarLector, 500);
+        setInterval(() => {
+            var el = window.parent.document.querySelector('input[placeholder="oculto_scanner"]');
+            if(el && document.activeElement !== el) el.focus();
+        }, 800);
         </script>
     """, height=0)
 
-    st.subheader("📝 Pedido Actual")
+    st.subheader("📝 Pedido")
     total = sum(int(i["monto"]) for i in st.session_state.pedido_temporal)
     
     for i, item in enumerate(st.session_state.pedido_temporal):
-        p_i = f"${int(item['monto']):,}".replace(",", ".")
         ctx, cbt = st.columns([4, 1])
-        ctx.write(f"• {item['producto']} ({p_i})")
-        if cbt.button("🗑️", key=f"del_ped_{i}"):
+        ctx.write(f"• {item['producto']} (${int(item['monto']):,})".replace(",", "."))
+        if cbt.button("🗑️", key=f"del_{i}"): 
             st.session_state.pedido_temporal.pop(i)
             st.rerun()
             
     st.divider()
     st.markdown(f"## TOTAL: \${total:,}".replace(",", "."))
     
-    # --- LOS DOS BOTONES DE COBRO MAGICO ---
     if st.session_state.pedido_temporal:
-        st.write("¿Cómo paga el cliente?")
-        
-        # Botón GIGANTE a lo ancho
         if st.button("✅ PAGO EXACTO", type="primary", use_container_width=True):
-            try:
-                ejecutar_finalizar_venta()
-                st.rerun()
-            except Exception as e:
-                st.error(f"Error al guardar: {e}")
+            ejecutar_finalizar_venta()
+            st.rerun()
                 
-        # Botón de vuelto más chico y centrado abajo
-        c_v1, c_v2, c_v3 = st.columns([1, 2, 1])
-        with c_v2:
-            if st.button("🤝 VUELTO PENDIENTE", use_container_width=True):
-                modal_venta_debo(total)
+        c_v2 = st.columns([1, 2, 1])[1]
+        if c_v2.button("🤝 VUELTO PEND.", use_container_width=True): modal_venta_debo(total)
 
-    # --- ZONA SEGURA DE IMPRESIÓN ---
     if st.session_state.ticket_imprimir:
         components.html(st.session_state.ticket_imprimir, height=0, width=0)
         st.session_state.ticket_imprimir = ""
