@@ -1,283 +1,143 @@
 import streamlit as st
 from supabase import create_client, Client
 import pandas as pd
-import plotly.express as px
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 # 🎨 Configuración de pantalla
-st.set_page_config(page_title="Métricas Santos", page_icon="📊", layout="wide")
+st.set_page_config(page_title="Admin Santos", layout="wide")
 
-# Custom CSS para estilo minimalista
-st.markdown("""
-    <style>
-    [data-testid="stMetricValue"] {
-        font-size: 1.8rem !important;
-        font-weight: 700 !important;
-    }
-    .stSelectbox label {
-        font-weight: 600 !important;
-        font-size: 1.05rem !important;
-    }
-    div[data-testid="stVerticalBlock"] > div {
-        border-radius: 10px;
-    }
-    </style>
-""", unsafe_allow_html=True)
-
-# ==========================================
-# 🔒 SISTEMA DE SEGURIDAD (PRIVACIDAD)
-# ==========================================
-if 'autenticado' not in st.session_state:
-    st.session_state.autenticado = False
-
-if not st.session_state.autenticado:
-    st.title("🔒 Acceso Restringido")
-    st.write("Panel de administración exclusivo.")
-    clave = st.text_input("Ingresa la clave de administrador:", type="password")
-    if st.button("Entrar", type="primary"):
-        if clave == "12345": 
-            st.session_state.autenticado = True
-            st.rerun()
-        else:
-            st.error("❌ Clave incorrecta.")
-    st.stop()
-
-# ==========================================
-# CONFIGURACIÓN DE SUPABASE ⚡
-# ==========================================
-URL_SUPABASE = "https://luklxueplpxdktreuloa.supabase.co"
-KEY_SUPABASE = "sb_publishable_KxAtLO6z0_4SUtbpQDWekQ_mKXZZebX"
-supabase: Client = create_client(URL_SUPABASE, KEY_SUPABASE)
-
+# --- 🕒 FUNCIONES DE HORA ---
 def obtener_hora_chile():
     return datetime.now(ZoneInfo("America/Santiago"))
 
-# --- 📥 DESCARGAR DATOS DE SUPABASE ---
+# CONEXIÓN SUPABASE
+@st.cache_resource
+def init_connection():
+    URL_SUPABASE = "https://luklxueplpxdktreuloa.supabase.co"
+    KEY_SUPABASE = "sb_publishable_KxAtLO6z0_4SUtbpQDWekQ_mKXZZebX"
+    return create_client(URL_SUPABASE, KEY_SUPABASE)
+
+supabase = init_connection()
+
+st.title("📊 Panel de Administración - Restaurante Santos")
+
+# --- FILTRO DE FECHA ---
+fecha_seleccionada = st.date_input("📅 Selecciona la fecha a revisar", obtener_hora_chile().date())
+fecha_inicio = f"{fecha_seleccionada}T00:00:00"
+fecha_fin = f"{fecha_seleccionada}T23:59:59"
+
+# --- OBTENER DATOS DE SUPABASE ---
 @st.cache_data(ttl=5)
-def cargar_datos():
-    res_ventas = supabase.table("ventas").select("*").execute()
-    df_v = pd.DataFrame(res_ventas.data)
+def cargar_datos(inicio, fin):
+    # Ventas
+    res_ventas = supabase.table("ventas").select("*").gte("created_at", inicio).lte("created_at", fin).execute()
+    df_ventas = pd.DataFrame(res_ventas.data) if res_ventas.data else pd.DataFrame(columns=["id", "producto", "monto", "categoria", "created_at"])
     
-    res_gastos = supabase.table("gastos").select("*").execute()
-    df_g = pd.DataFrame(res_gastos.data)
+    # Gastos
+    res_gastos = supabase.table("gastos").select("*").gte("created_at", inicio).lte("created_at", fin).execute()
+    df_gastos = pd.DataFrame(res_gastos.data) if res_gastos.data else pd.DataFrame(columns=["id", "monto", "descripcion", "created_at"])
     
-    try:
-        res_debo = supabase.table("debo").select("*").execute()
-        df_d = pd.DataFrame(res_debo.data)
-    except:
-        df_d = pd.DataFrame()
+    # Debo
+    res_debo = supabase.table("debo").select("*").gte("created_at", inicio).lte("created_at", fin).execute()
+    df_debo = pd.DataFrame(res_debo.data) if res_debo.data else pd.DataFrame(columns=["id", "nombre", "monto_devolver", "descripcion", "created_at"])
     
-    if not df_v.empty:
-        df_v['created_at'] = pd.to_datetime(df_v['created_at'], utc=True).dt.tz_convert('America/Santiago')
-        df_v['fecha_str'] = df_v['created_at'].dt.strftime('%d-%m-%Y')
-        df_v['categoria_upper'] = df_v['categoria'].fillna('').astype(str).str.strip().str.upper()
+    return df_ventas, df_gastos, df_debo
 
-    if not df_g.empty:
-        df_g['created_at'] = pd.to_datetime(df_g['created_at'], utc=True).dt.tz_convert('America/Santiago')
-        df_g['fecha_str'] = df_g['created_at'].dt.strftime('%d-%m-%Y')
+df_ventas, df_gastos, df_debo = cargar_datos(fecha_inicio, fecha_fin)
 
-    if not df_d.empty:
-        df_d['created_at'] = pd.to_datetime(df_d['created_at'], utc=True).dt.tz_convert('America/Santiago')
-        df_d['fecha_str'] = df_d['created_at'].dt.strftime('%d-%m-%Y')
+# --- PROCESAMIENTO DE CATEGORÍAS ---
+if not df_ventas.empty:
+    # Estandarizar categorías
+    df_ventas['categoria'] = df_ventas['categoria'].str.upper().fillna("OTROS")
+    
+    # Agrupar Tienda, Caja Vecina y Recargas en "TIENDA"
+    tienda_keywords = ["TIENDA", "CAJA VECINA", "RECARGAS"]
+    df_ventas['grupo'] = df_ventas['categoria'].apply(
+        lambda x: "TIENDA" if any(k in x for k in tienda_keywords) else (
+                  "OTROS" if x not in ["DESAYUNO", "ALMUERZO", "CENA"] else x)
+    )
+    
+    total_ingresos = df_ventas['monto'].sum()
+else:
+    total_ingresos = 0
 
-    return df_v, df_g, df_d
+total_gastos = df_gastos['monto'].sum() if not df_gastos.empty else 0
+total_neto = total_ingresos - total_gastos
 
-st.title("📊 Panel de Control - Restaurante Santos")
-st.caption(f"🕒 Última actualización: {obtener_hora_chile().strftime('%d-%m-%Y %H:%M:%S hrs')}")
+# --- MÉTRICAS PRINCIPALES ---
+st.divider()
+c1, c2, c3 = st.columns(3)
+c1.metric("💰 INGRESOS TOTALES", f"${int(total_ingresos):,}".replace(",", "."))
+c2.metric("💸 GASTOS TOTALES", f"${int(total_gastos):,}".replace(",", "."))
+c3.metric("🏆 TOTAL NETO (Caja Final)", f"${int(total_neto):,}".replace(",", "."))
+st.divider()
 
-if st.button("🔄 Refrescar Datos Ahora"):
+# --- DETALLE DE VENTAS Y GRÁFICOS ---
+st.header("📈 Desglose de Ventas por Categoría")
+
+if not df_ventas.empty:
+    grupos = ["DESAYUNO", "ALMUERZO", "CENA", "TIENDA", "OTROS"]
+    
+    for grupo in grupos:
+        df_grupo = df_ventas[df_ventas['grupo'] == grupo]
+        
+        if not df_grupo.empty:
+            st.subheader(f"🍽️ {grupo.capitalize()}")
+            
+            # Totales del grupo
+            dinero_grupo = df_grupo['monto'].sum()
+            platos_vendidos = len(df_grupo)
+            
+            st.markdown(f"**Total vendido en {grupo.capitalize()}:** ${int(dinero_grupo):,} | **Cantidad de ventas:** {platos_vendidos}".replace(",", "."))
+            
+            # Preparar datos para el gráfico (Contar cuántas veces se vendió cada producto)
+            resumen_productos = df_grupo.groupby('producto').size().reset_index(name='Cantidad')
+            resumen_productos = resumen_productos.sort_values(by='Cantidad', ascending=False)
+            
+            # Gráfico de barras
+            st.bar_chart(resumen_productos.set_index('producto'), y='Cantidad', height=300)
+else:
+    st.info("No hay ventas registradas para esta fecha.")
+
+st.divider()
+
+# --- SECCIÓN DE GASTOS DETALLADOS ---
+st.header("📉 Detalle de Gastos")
+if not df_gastos.empty:
+    st.error(f"**Total gastado hoy:** ${int(total_gastos):,}".replace(",", "."))
+    
+    # Crear una tabla visualmente agradable para los gastos
+    for idx, row in df_gastos.iterrows():
+        try:
+            hora = datetime.fromisoformat(row['created_at'].replace('Z', '+00:00')).astimezone(ZoneInfo("America/Santiago")).strftime("%H:%M")
+        except:
+            hora = "--:--"
+            
+        c1, c2, c3 = st.columns([1, 4, 2])
+        c1.write(f"🕒 {hora}")
+        c2.write(f"📝 {row['descripcion']}")
+        c3.write(f"**${int(row['monto']):,}**".replace(",", "."))
+        st.markdown("---")
+else:
+    st.success("No hay gastos registrados en esta fecha.")
+
+st.divider()
+
+# --- SECCIÓN DE DEBO ---
+st.header("🤝 Registro de DEBO (Vueltos pendientes)")
+if not df_debo.empty:
+    for idx, row in df_debo.iterrows():
+        c1, c2 = st.columns([4, 2])
+        with c1:
+            st.markdown(f"**👤 {row['nombre']}** - {row.get('descripcion', 'Vuelto')}")
+        with c2:
+            st.warning(f"Debes: **${int(row['monto_devolver']):,}**".replace(",", "."))
+        st.markdown("---")
+else:
+    st.info("No hay deudas pendientes registradas hoy.")
+
+# Botón para actualizar la página
+if st.button("🔄 Actualizar Datos", type="primary", use_container_width=True):
     st.cache_data.clear()
     st.rerun()
-
-df_ventas, df_gastos, df_debo = cargar_datos()
-
-# ==========================================
-# 📅 SELECTOR DE FECHAS EN MENÚ DESPLEGABLE
-# ==========================================
-fechas_lista = []
-if not df_ventas.empty and 'fecha_str' in df_ventas.columns:
-    fechas_lista.extend(df_ventas['fecha_str'].unique().tolist())
-
-hoy_str = obtener_hora_chile().strftime('%d-%m-%Y')
-if hoy_str not in fechas_lista:
-    fechas_lista.append(hoy_str)
-
-fechas_ordenadas = sorted(list(set(fechas_lista)), key=lambda x: datetime.strptime(x, '%d-%m-%Y'), reverse=True)
-
-opciones_desplegable = ["Hoy (" + hoy_str + ")", "Todos los tiempos", "Últimos 7 días", "Todo el mes"] + fechas_ordenadas
-
-opcion_seleccionada = st.selectbox("📅 Selecciona el periodo o un día específico:", opciones_desplegable)
-
-if "Hoy" in opcion_seleccionada:
-    ventas_filtradas = df_ventas[df_ventas['fecha_str'] == hoy_str] if not df_ventas.empty else pd.DataFrame()
-    gastos_filtrados = df_gastos[df_gastos['fecha_str'] == hoy_str] if not df_gastos.empty else pd.DataFrame()
-    debo_filtrado = df_debo[df_debo['fecha_str'] == hoy_str] if not df_debo.empty else pd.DataFrame()
-elif opcion_seleccionada == "Todos los tiempos":
-    ventas_filtradas = df_ventas
-    gastos_filtrados = df_gastos
-    debo_filtrado = df_debo
-elif opcion_seleccionada == "Últimos 7 días":
-    hace_7 = (obtener_hora_chile() - timedelta(days=7)).date()
-    ventas_filtradas = df_ventas[df_ventas['created_at'].dt.date >= hace_7] if not df_ventas.empty else pd.DataFrame()
-    gastos_filtrados = df_gastos[df_gastos['created_at'].dt.date >= hace_7] if not df_gastos.empty else pd.DataFrame()
-    debo_filtrado = df_debo[df_debo['created_at'].dt.date >= hace_7] if not df_debo.empty else pd.DataFrame()
-elif opcion_seleccionada == "Todo el mes":
-    primer_dia_mes = obtener_hora_chile().date().replace(day=1)
-    ventas_filtradas = df_ventas[df_ventas['created_at'].dt.date >= primer_dia_mes] if not df_ventas.empty else pd.DataFrame()
-    gastos_filtrados = df_gastos[df_gastos['created_at'].dt.date >= primer_dia_mes] if not df_gastos.empty else pd.DataFrame()
-    debo_filtrado = df_debo[df_debo['created_at'].dt.date >= primer_dia_mes] if not df_debo.empty else pd.DataFrame()
-else:
-    fecha_elegida = opcion_seleccionada
-    ventas_filtradas = df_ventas[df_ventas['fecha_str'] == fecha_elegida] if not df_ventas.empty else pd.DataFrame()
-    gastos_filtrados = df_gastos[df_gastos['fecha_str'] == fecha_elegida] if not df_gastos.empty else pd.DataFrame()
-    debo_filtrado = df_debo[df_debo['fecha_str'] == fecha_elegida] if not df_debo.empty else pd.DataFrame()
-
-# ==========================================
-# 🧮 CÁLCULOS Y SEPARACIÓN DE CATEGORÍAS
-# ==========================================
-if not ventas_filtradas.empty:
-    desayuno_total = ventas_filtradas[ventas_filtradas['categoria_upper'] == "DESAYUNO"]['monto'].sum()
-    almuerzo_total = ventas_filtradas[ventas_filtradas['categoria_upper'] == "ALMUERZO"]['monto'].sum()
-    cena_total = ventas_filtradas[ventas_filtradas['categoria_upper'] == "CENA"]['monto'].sum()
-    
-    bebestible_total = ventas_filtradas[ventas_filtradas['categoria_upper'] == "BEBESTIBLE"]['monto'].sum()
-    chela_total = ventas_filtradas[ventas_filtradas['categoria_upper'] == "CHELA"]['monto'].sum()
-    tienda_otros_total = ventas_filtradas[ventas_filtradas['categoria_upper'].isin(["TIENDA", "OTROS"])]['monto'].sum()
-    caja_vecina_total = ventas_filtradas[ventas_filtradas['categoria_upper'].isin(["CAJA VECINA", "RECARGA"])]['monto'].sum()
-    
-    ventas_comida_total = desayuno_total + almuerzo_total + cena_total
-    ventas_otras_cat_total = bebestible_total + chela_total + tienda_otros_total
-    ventas_restaurante_total = ventas_comida_total + ventas_otras_cat_total
-else:
-    desayuno_total = almuerzo_total = cena_total = bebestible_total = chela_total = tienda_otros_total = caja_vecina_total = ventas_comida_total = ventas_otras_cat_total = ventas_restaurante_total = 0
-
-total_gastos = gastos_filtrados['monto'].sum() if not gastos_filtrados.empty else 0
-total_vueltos_pendientes = debo_filtrado['monto_devolver'].fillna(0).sum() if not debo_filtrado.empty and 'monto_devolver' in debo_filtrado.columns else 0
-
-ganancia_neta = ventas_restaurante_total - total_gastos
-
-# ==========================================
-# 🧱 TARJETAS MINIMALISTAS (CUADROS BORDADOS)
-# ==========================================
-
-# 1. BLOQUE COMIDA
-with st.container(border=True):
-    st.markdown("#### 🍔 Ventas de Comida")
-    col_c1, col_c2, col_c3, col_c4 = st.columns(4)
-    col_c1.metric("🍳 Desayunos", f"${int(desayuno_total):,}".replace(",", "."))
-    col_c2.metric("🍲 Almuerzos", f"${int(almuerzo_total):,}".replace(",", "."))
-    col_c3.metric("🌙 Cenas", f"${int(cena_total):,}".replace(",", "."))
-    col_c4.metric("🔥 TOTAL COMIDA", f"${int(ventas_comida_total):,}".replace(",", "."))
-
-# 2. BLOQUE OTRAS CATEGORÍAS
-with st.container(border=True):
-    st.markdown("#### 🥤 Otras Categorías (Bebidas, Chelas, Tienda)")
-    col_o1, col_o2, col_o3, col_o4 = st.columns(4)
-    col_o1.metric("🥤 Bebestibles", f"${int(bebestible_total):,}".replace(",", "."))
-    col_o2.metric("🍺 Chelas", f"${int(chela_total):,}".replace(",", "."))
-    col_o3.metric("🏪 Tienda / Otros", f"${int(tienda_otros_total):,}".replace(",", "."))
-    col_o4.metric("🛍️ TOTAL OTRAS CAT.", f"${int(ventas_otras_cat_total):,}".replace(",", "."))
-
-# 3. BALANCE GENERAL DE GANANCIAS
-with st.container(border=True):
-    st.markdown("#### 🏆 Balance General y Ganancia Neta")
-    col_r1, col_r2, col_r3 = st.columns(3)
-    col_r1.metric("💰 Ventas Totales Restaurante", f"${int(ventas_restaurante_total):,}".replace(",", "."))
-    col_r2.metric("📉 Gastos Registrados", f"${int(total_gastos):,}".replace(",", "."))
-    col_r3.metric("🏆 GANANCIA NETA REAL", f"${int(ganancia_neta):,}".replace(",", "."))
-
-# 4. INFORMACIÓN DE CAJA Y RETENCIONES (APARTE DE LA GANANCIA)
-with st.container(border=True):
-    st.markdown("#### 🏦 Movimientos de Caja y Vueltos (Aparte de la Ganancia)")
-    col_i1, col_i2 = st.columns(2)
-    col_i1.metric("🏦 Movimientos Caja Vecina / Recargas", f"${int(caja_vecina_total):,}".replace(",", "."), help="Dinero procesado por servicios de caja vecina.")
-    col_i2.metric("🤝 Vueltos Pendientes (Debería sobrar en caja)", f"${int(total_vueltos_pendientes):,}".replace(",", "."), help="Dinero retenido en caja perteneciente a clientes por vuelto pendiente.")
-
-st.markdown("---")
-
-# ==========================================
-# 📈 GRÁFICOS SEPARADOS (COMIDA VS OTROS)
-# ==========================================
-st.subheader("📊 Distribución de Ventas")
-col_g1, col_g2 = st.columns(2)
-
-with col_g1:
-    with st.container(border=True):
-        st.markdown("##### 🍕 Porcentaje por Comida")
-        if not ventas_filtradas.empty:
-            df_comida = ventas_filtradas[ventas_filtradas['categoria_upper'].isin(["DESAYUNO", "ALMUERZO", "CENA"])]
-            if not df_comida.empty:
-                agrupado_comida = df_comida.groupby("categoria")["monto"].sum().reset_index()
-                fig_pie_comida = px.pie(agrupado_comida, values='monto', names='categoria', hole=0.4, color_discrete_sequence=px.colors.qualitative.Pastel)
-                fig_pie_comida.update_layout(margin=dict(t=20, b=20, l=10, r=10))
-                st.plotly_chart(fig_pie_comida, use_container_width=True)
-            else:
-                st.info("Sin ventas de comida en este periodo.")
-        else:
-            st.info("Sin datos.")
-
-with col_g2:
-    with st.container(border=True):
-        st.markdown("##### 🥤 Porcentaje por Otras Categorías")
-        if not ventas_filtradas.empty:
-            df_otros = ventas_filtradas[ventas_filtradas['categoria_upper'].isin(["BEBESTIBLE", "CHELA", "TIENDA", "OTROS"])]
-            if not df_otros.empty:
-                agrupado_otros = df_otros.groupby("categoria")["monto"].sum().reset_index()
-                fig_pie_otros = px.pie(agrupado_otros, values='monto', names='categoria', hole=0.4, color_discrete_sequence=px.colors.qualitative.Set3)
-                fig_pie_otros.update_layout(margin=dict(t=20, b=20, l=10, r=10))
-                st.plotly_chart(fig_pie_otros, use_container_width=True)
-            else:
-                st.info("Sin ventas de otros productos en este periodo.")
-        else:
-            st.info("Sin datos.")
-
-# ==========================================
-# 🔥 RANKINGS TOP MÁS VENDIDOS
-# ==========================================
-st.subheader("🔥 Lo Más Vendido")
-col_r_top1, col_r_top2 = st.columns(2)
-
-with col_r_top1:
-    with st.container(border=True):
-        st.markdown("##### 🍳 Top Comidas Más Vendidas")
-        if not ventas_filtradas.empty:
-            df_top_comida = ventas_filtradas[ventas_filtradas['categoria_upper'].isin(["DESAYUNO", "ALMUERZO", "CENA"])]
-            if not df_top_comida.empty:
-                df_rank_comida = df_top_comida.groupby("producto")["monto"].sum().reset_index().sort_values(by="monto", ascending=False).head(5)
-                fig_bar_comida = px.bar(df_rank_comida, x="monto", y="producto", orientation='h', color="monto", color_continuous_scale="Oranges")
-                fig_bar_comida.update_layout(yaxis={'categoryorder':'total ascending'}, margin=dict(t=20, b=20, l=10, r=10))
-                st.plotly_chart(fig_bar_comida, use_container_width=True)
-            else:
-                st.info("Sin ventas de comida.")
-        else:
-            st.info("Sin datos.")
-
-with col_r_top2:
-    with st.container(border=True):
-        st.markdown("##### 🍺 Top Otros Productos Más Vendidos")
-        if not ventas_filtradas.empty:
-            df_top_otros = ventas_filtradas[ventas_filtradas['categoria_upper'].isin(["BEBESTIBLE", "CHELA", "TIENDA", "OTROS"])]
-            if not df_top_otros.empty:
-                df_rank_otros = df_top_otros.groupby("producto")["monto"].sum().reset_index().sort_values(by="monto", ascending=False).head(5)
-                fig_bar_otros = px.bar(df_rank_otros, x="monto", y="producto", orientation='h', color="monto", color_continuous_scale="Blues")
-                fig_bar_otros.update_layout(yaxis={'categoryorder':'total ascending'}, margin=dict(t=20, b=20, l=10, r=10))
-                st.plotly_chart(fig_bar_otros, use_container_width=True)
-            else:
-                st.info("Sin ventas de otros productos.")
-        else:
-            st.info("Sin datos.")
-
-# ==========================================
-# 📋 TABLAS DE DETALLES (DEBO)
-# ==========================================
-st.markdown("---")
-with st.container(border=True):
-    st.subheader("📝 Detalle de Registros Pendientes (Debo)")
-    if not debo_filtrado.empty:
-        tabla_debo = debo_filtrado[['created_at', 'nombre', 'monto', 'monto_devolver', 'descripcion']].copy()
-        tabla_debo['created_at'] = tabla_debo['created_at'].dt.strftime('%d-%m-%Y %H:%M')
-        tabla_debo.columns = ['Fecha/Hora', 'Cliente', 'Monto Recibido ($)', 'Debo Entregar ($)', 'Descripción']
-        st.dataframe(tabla_debo.sort_values(by="Fecha/Hora", ascending=False), use_container_width=True)
-    else:
-        st.info("No hay registros de DEBO en este periodo.")
