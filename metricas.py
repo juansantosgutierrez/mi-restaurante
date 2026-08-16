@@ -3,6 +3,7 @@ from supabase import create_client, Client
 import pandas as pd
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
+import altair as alt
 
 # 🎨 Configuración de pantalla
 st.set_page_config(page_title="Admin Santos", layout="wide")
@@ -46,18 +47,16 @@ def cargar_datos(inicio, fin):
 
 df_ventas, df_gastos, df_debo = cargar_datos(fecha_inicio, fecha_fin)
 
-# --- PROCESAMIENTO DE CATEGORÍAS ---
+# --- PROCESAMIENTO GENERAL ---
 if not df_ventas.empty:
-    # Estandarizar categorías
     df_ventas['categoria'] = df_ventas['categoria'].str.upper().fillna("OTROS")
     
-    # Agrupar Tienda, Caja Vecina y Recargas en "TIENDA"
+    # Agrupar categorías
     tienda_keywords = ["TIENDA", "CAJA VECINA", "RECARGAS"]
     df_ventas['grupo'] = df_ventas['categoria'].apply(
         lambda x: "TIENDA" if any(k in x for k in tienda_keywords) else (
                   "OTROS" if x not in ["DESAYUNO", "ALMUERZO", "CENA"] else x)
     )
-    
     total_ingresos = df_ventas['monto'].sum()
 else:
     total_ingresos = 0
@@ -65,49 +64,69 @@ else:
 total_gastos = df_gastos['monto'].sum() if not df_gastos.empty else 0
 total_neto = total_ingresos - total_gastos
 
-# --- MÉTRICAS PRINCIPALES ---
+# --- MÉTRICAS PRINCIPALES (ARRIBA) ---
 st.divider()
+st.subheader("🏦 RESUMEN GLOBAL DEL DÍA")
 c1, c2, c3 = st.columns(3)
 c1.metric("💰 INGRESOS TOTALES", f"${int(total_ingresos):,}".replace(",", "."))
 c2.metric("💸 GASTOS TOTALES", f"${int(total_gastos):,}".replace(",", "."))
 c3.metric("🏆 TOTAL NETO (Caja Final)", f"${int(total_neto):,}".replace(",", "."))
 st.divider()
 
-# --- DETALLE DE VENTAS Y GRÁFICOS ---
-st.header("📈 Desglose de Ventas por Categoría")
+# --- DESGLOSE POR CATEGORÍA CON GRÁFICOS FIJOS ---
+st.header("📈 Desglose de Ventas por Sección")
 
 if not df_ventas.empty:
     grupos = ["DESAYUNO", "ALMUERZO", "CENA", "TIENDA", "OTROS"]
     
     for grupo in grupos:
-        df_grupo = df_ventas[df_ventas['grupo'] == grupo]
+        df_grupo = df_ventas[df_ventas['grupo'] == grupo].copy()
         
         if not df_grupo.empty:
-            st.subheader(f"🍽️ {grupo.capitalize()}")
+            # 1. Agrupar productos de desayuno (Eliminar el + TE, + CAFE, etc.)
+            if grupo == "DESAYUNO":
+                df_grupo['producto_base'] = df_grupo['producto'].apply(lambda x: x.split(" + ")[0].strip())
+            else:
+                df_grupo['producto_base'] = df_grupo['producto']
             
-            # Totales del grupo
+            # Calcular totales del grupo
             dinero_grupo = df_grupo['monto'].sum()
             platos_vendidos = len(df_grupo)
             
-            st.markdown(f"**Total vendido en {grupo.capitalize()}:** ${int(dinero_grupo):,} | **Cantidad de ventas:** {platos_vendidos}".replace(",", "."))
+            # 2. Mostrar los Cuadros Separados (Métricas de la categoría)
+            st.subheader(f"🍽️ {grupo.capitalize()}")
+            col_dinero, col_cantidad = st.columns(2)
+            col_dinero.metric(label=f"Total Neto ({grupo.capitalize()})", value=f"${int(dinero_grupo):,}".replace(",", "."))
+            col_cantidad.metric(label="Artículos Vendidos", value=platos_vendidos)
             
-            # Preparar datos para el gráfico (Contar cuántas veces se vendió cada producto)
-            resumen_productos = df_grupo.groupby('producto').size().reset_index(name='Cantidad')
+            # 3. Preparar el gráfico de barras
+            resumen_productos = df_grupo.groupby('producto_base').size().reset_index(name='Cantidad')
             resumen_productos = resumen_productos.sort_values(by='Cantidad', ascending=False)
             
-            # Gráfico de barras
-            st.bar_chart(resumen_productos.set_index('producto'), y='Cantidad', height=300)
+            # 4. Crear el Gráfico Profesional (Fijo, sin zoom)
+            grafico_barras = alt.Chart(resumen_productos).mark_bar(
+                color='#1f77b4', 
+                cornerRadiusTopLeft=4, 
+                cornerRadiusTopRight=4
+            ).encode(
+                x=alt.X('producto_base', sort='-y', title='Producto Vendido', axis=alt.Axis(labelAngle=-45, labelLimit=200)),
+                y=alt.Y('Cantidad', title='Cantidad', axis=alt.Axis(tickMinStep=1)),
+                tooltip=['producto_base', 'Cantidad']
+            ).properties(
+                height=300
+            )
+            
+            # Mostrar el gráfico
+            st.altair_chart(grafico_barras, use_container_width=True)
+            st.markdown("---")
 else:
     st.info("No hay ventas registradas para esta fecha.")
-
-st.divider()
 
 # --- SECCIÓN DE GASTOS DETALLADOS ---
 st.header("📉 Detalle de Gastos")
 if not df_gastos.empty:
     st.error(f"**Total gastado hoy:** ${int(total_gastos):,}".replace(",", "."))
     
-    # Crear una tabla visualmente agradable para los gastos
     for idx, row in df_gastos.iterrows():
         try:
             hora = datetime.fromisoformat(row['created_at'].replace('Z', '+00:00')).astimezone(ZoneInfo("America/Santiago")).strftime("%H:%M")
