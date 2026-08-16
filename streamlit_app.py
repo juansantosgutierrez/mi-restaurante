@@ -11,6 +11,13 @@ import uuid
 def obtener_hora_chile():
     return datetime.now(ZoneInfo("America/Santiago"))
 
+def formatear_hora_supabase(fecha_utc_str):
+    try:
+        dt = datetime.fromisoformat(fecha_utc_str.replace('Z', '+00:00'))
+        return dt.astimezone(ZoneInfo("America/Santiago")).strftime("%H:%M hrs")
+    except:
+        return fecha_utc_str
+
 # --- 🛡️ FILTRO DICTATORIAL (Rápido) ---
 def filtro_estricto(texto):
     if not texto: return ""
@@ -103,7 +110,6 @@ def ejecutar_finalizar_venta():
             </div>
             """
         
-        # SISTEMA DE IMPRESIÓN DIRECTO (Codificación nativa sin trucos raros, 100% anti letras chinas)
         st.session_state.ticket_imprimir = f"""
         <!DOCTYPE html>
         <html>
@@ -126,7 +132,7 @@ def ejecutar_finalizar_venta():
         
     st.session_state.pedido_temporal = []
 
-# --- MODALES OPTIMIZADOS CON TECLA ENTER ---
+# --- MODALES ---
 
 @st.dialog("☕ Elegir Bebida")
 def modal_desayuno(row):
@@ -196,6 +202,66 @@ def modal_cajavecina():
                 st.session_state.pedido_temporal.append({"categoria": "CAJA VECINA", "producto": "CAJA VECINA", "monto": int(m_custom)})
                 st.rerun()
 
+@st.dialog("🤝 Registro DEBO Manual", width="large")
+def modal_debo():
+    with st.expander("➕ Agregar Nuevo Registro", expanded=False):
+        with st.form("form_nuevo_debo", clear_on_submit=True):
+            nom = st.text_input("Nombre de la persona")
+            c1, c2 = st.columns(2)
+            with c1:
+                mon_recibido = st.number_input("Monto que me dio ($)", min_value=0, step=100, value=None)
+            with c2:
+                mon_devolver = st.number_input("Debo entregar ($)", min_value=0, step=100, value=None)
+                
+            desc = st.text_input("Descripción (Ej: Falta vuelto o Motivo)")
+            
+            if st.form_submit_button("💾 Guardar Registro (Presiona Enter)", type="primary"):
+                if nom and desc:
+                    datos = {"nombre": filtro_estricto(nom), "descripcion": filtro_estricto(desc)}
+                    if mon_recibido is not None: datos["monto"] = int(mon_recibido)
+                    if mon_devolver is not None: datos["monto_devolver"] = int(mon_devolver)
+                    
+                    supabase.table("debo").insert(datos).execute()
+                    st.rerun() 
+                else:
+                    st.error("Ingresa al menos el nombre y la descripción.")
+
+    st.divider()
+    st.caption("📅 Registros del día:")
+    fecha_sel = st.date_input("Fecha", obtener_hora_chile().date(), label_visibility="collapsed")
+    fecha_ini = f"{fecha_sel}T00:00:00"
+    fecha_fin = f"{fecha_sel}T23:59:59"
+    try:
+        res = supabase.table("debo").select("*").gte("created_at", fecha_ini).lte("created_at", fecha_fin).order("created_at", desc=True).execute()
+        registros = res.data
+    except Exception: 
+        registros = []
+        
+    if not registros:
+        st.info("ℹ️ No hay registros pendientes para esta fecha.")
+    else:
+        for item in registros:
+            c1, c2, c3 = st.columns([5, 2, 2])
+            with c1:
+                st.markdown(f"**👤 {item['nombre']}**")
+                detalles = []
+                if item.get('monto'):
+                    detalles.append(f"Me dio: \${int(item['monto']):,}".replace(",", "."))
+                if item.get('monto_devolver'):
+                    detalles.append(f"Debo entregar: \${int(item['monto_devolver']):,}".replace(",", "."))
+                
+                if detalles:
+                    st.write(" | ".join(detalles))
+                st.caption(f"📝 {item.get('descripcion', '')}")
+            with c2:
+                hora_bonita = formatear_hora_supabase(item.get('created_at', ''))
+                st.caption(f"🕒 {hora_bonita}")
+            with c3:
+                if st.button("↩️ Devolver", key=f"dev_{item['id']}"):
+                    supabase.table("debo").delete().eq("id", item['id']).execute()
+                    st.rerun()
+            st.markdown("---")
+
 @st.dialog("🤝 Vender y Dejar Vuelto Pendiente")
 def modal_venta_debo(total_venta):
     st.markdown(f"### Total: **${total_venta:,}**".replace(",", "."))
@@ -221,9 +287,7 @@ def procesar_scanner():
         if not encontrado.empty:
             row = encontrado.iloc[0]
             cat_limpia = filtro_estricto(row['categoria'])
-            # Si el escáner lee un desayuno que casualmente tenía código de barras (raro, pero por si acaso):
             if cat_limpia == "DESAYUNO" and not any(x in row['producto'] for x in ["CALDO", "CAFE", "TE", "MATE"]):
-                # Agregar sin bebida directo para no interrumpir el flujo del escáner
                 st.session_state.pedido_temporal.append({"categoria": cat_limpia, "producto": row['producto'], "monto": row['monto']})
             else:
                 st.session_state.pedido_temporal.append({"categoria": cat_limpia, "producto": row['producto'], "monto": row['monto']})
@@ -237,7 +301,7 @@ def procesar_scanner():
 c1, c2, c3, c4, c5 = st.columns([2, 1, 1, 1, 1])
 c1.title("🍴 Restaurante Santos")
 if c2.button("💸 GASTOS", use_container_width=True): modal_gastos()
-if c3.button("🔄 DATOS", use_container_width=True): st.cache_data.clear(); st.rerun()
+if c3.button("🤝 DEBO", use_container_width=True): modal_debo()
 if c4.button("🏦 C. VECINA", use_container_width=True): modal_cajavecina()
 if c5.button("🔄 EDITOR" if st.session_state.modo_editor else "➕ MENÚ", use_container_width=True):
     st.session_state.modo_editor = not st.session_state.modo_editor
@@ -264,9 +328,7 @@ with col_m:
                             st.cache_data.clear()
                             st.rerun()
                             
-                    # BOTONES DEL MENÚ
                     if st.button(f"{row['producto']}\n\n${int(row['monto']):,}".replace(",", "."), key=f"b_{row['id']}", use_container_width=True):
-                        # Lógica especial para el desayuno (Abre la ventanita)
                         if cat_limpia == "DESAYUNO" and not any(x in filtro_estricto(row['producto']) for x in ["CALDO", "CAFE", "TE", "MATE"]):
                             modal_desayuno(row)
                         else:
